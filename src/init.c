@@ -64,7 +64,7 @@ static void jl_find_stack_bottom(void)
 }
 
 #ifdef __WIN32__
-void fpe_handler(int arg,int num)
+void __cdecl fpe_handler(int arg,int num)
 #else
 void fpe_handler(int arg)
 #endif
@@ -77,12 +77,13 @@ void fpe_handler(int arg)
     sigprocmask(SIG_UNBLOCK, &sset, NULL);
 #else
     fpreset();
+    signal(SIGFPE, (void (__cdecl *)(int))fpe_handler);
     switch(num) {
     case _FPE_INVALID:
     case _FPE_OVERFLOW:
     case _FPE_UNDERFLOW:
     default:
-        jl_errorf("Unexpected FPE Error");
+        jl_errorf("Unexpected FPE Error 0x%X", num);
         break;
     case _FPE_ZERODIVIDE:
 #endif
@@ -136,11 +137,11 @@ void restore_signals()
 {
     SetConsoleCtrlHandler(NULL,0); //turn on ctrl-c handler
 }
-void win_raise_sigint()
-{
-    jl_throw(jl_interrupt_exception);
+static void __fastcall win_raise_exception(void* excpt)
+{ //why __fastcall? because the first two arguments are passed in registers, making this easier
+    jl_throw(excpt);
 }
-BOOL WINAPI sigint_handler(DWORD wsig) //This needs winapi types to guarantee __stdcall
+static BOOL WINAPI sigint_handler(DWORD wsig) //This needs winapi types to guarantee __stdcall
 {   
     int sig;
     //windows signals use different numbers from unix
@@ -164,7 +165,8 @@ BOOL WINAPI sigint_handler(DWORD wsig) //This needs winapi types to guarantee __
             printf("error: GetThreadContext failed\n");
             return 0;
         }
-        ctxThread.Eip = (DWORD)&win_raise_sigint; //on win64, use .Rip = (DWORD64)...
+        ctxThread.Eip = (DWORD)&win_raise_exception; //on win64, use .Rip = (DWORD64)...
+        ctxThread.Ecx = (DWORD)jl_interrupt_exception; //on win64, use .Rcx = (DWORD64)...
         if (!SetThreadContext(hMainThread,&ctxThread)) {
             printf("error: SetThreadContext failed\n");
             //error
@@ -177,6 +179,21 @@ BOOL WINAPI sigint_handler(DWORD wsig) //This needs winapi types to guarantee __
         }
     }
     return 1;
+}
+static LONG WINAPI exception_handler(struct _EXCEPTION_POINTERS *ExceptionInfo) {
+    //fprintf(stderr,"arrived in exception_handler!\n");
+    if (ExceptionInfo->ExceptionRecord->ExceptionFlags == 0) {
+        switch (ExceptionInfo->ExceptionRecord->ExceptionCode) {
+        case EXCEPTION_STACK_OVERFLOW:
+            ExceptionInfo->ContextRecord->Eip = (DWORD)&win_raise_exception; //on win64, use .Rip = (DWORD64)...
+            ExceptionInfo->ContextRecord->Ecx = (DWORD)jl_stackovf_exception; //on win64, use .Rcx = (DWORD64)...
+            return EXCEPTION_CONTINUE_EXECUTION;
+        default:
+            puts("Please submit a bug report with steps to reproduce this fault, and any error messages that follow (in their entirety). Thanks.\n");
+            break;
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 #else
 void restore_signals()
@@ -201,18 +218,22 @@ struct uv_shutdown_queue_item { uv_handle_t *h; struct uv_shutdown_queue_item *n
 struct uv_shutdown_queue { struct uv_shutdown_queue_item *first; struct uv_shutdown_queue_item *last; };
 static void jl_shutdown_uv_cb(uv_shutdown_t* req, int status)
 {
-    if (status == 0) jl_close_uv((uv_handle_t*)req->handle);
+    //if (status == 0)
+        jl_close_uv((uv_handle_t*)req->handle);
     free(req);
 }
-static void jl_uv_exitcleanup_walk(uv_handle_t* handle, void *arg)
+static void jl_uv_exitcleanup_add(uv_handle_t* handle, struct uv_shutdown_queue *queue)
 {
-    struct uv_shutdown_queue *queue = arg;
     struct uv_shutdown_queue_item *item = malloc(sizeof(struct uv_shutdown_queue_item));
     item->h = handle;
     item->next = NULL;
     if (queue->last) queue->last->next = item;
     if (!queue->first) queue->first = item;
     queue->last = item;
+}
+static void jl_uv_exitcleanup_walk(uv_handle_t* handle, void *arg) {
+    if (handle != (uv_handle_t*)jl_uv_stdout && handle != (uv_handle_t*)jl_uv_stderr)
+        jl_uv_exitcleanup_add(handle, arg);
 }
 DLLEXPORT void uv_atexit_hook()
 {
@@ -225,6 +246,10 @@ DLLEXPORT void uv_atexit_hook()
     uv_loop_t* loop = jl_global_event_loop();
     struct uv_shutdown_queue queue = {NULL, NULL};
     uv_walk(loop, jl_uv_exitcleanup_walk, &queue);
+    // close stdout and stderr last, since we like being
+    // able to show stuff (incl. printf's)
+    jl_uv_exitcleanup_add((uv_handle_t*)jl_uv_stdout, &queue);
+    jl_uv_exitcleanup_add((uv_handle_t*)jl_uv_stderr, &queue);
     struct uv_shutdown_queue_item *item = queue.first;
     while (item) {
         uv_handle_t *handle = item->h;
@@ -235,7 +260,7 @@ DLLEXPORT void uv_atexit_hook()
         switch(handle->type) {
         case UV_TTY:
         case UV_UDP:
-            //#ifndef __WIN32__ // unix only supports shutdown on TCP and NAMED_PIPE
+//#ifndef __WIN32__ // unix only supports shutdown on TCP and NAMED_PIPE
 // but uv_shutdown doesn't seem to be particularly reliable, so we'll avoid it in general
             jl_close_uv(handle);
             break;
@@ -245,7 +270,10 @@ DLLEXPORT void uv_atexit_hook()
             if (uv_is_writable((uv_stream_t*)handle)) { // uv_shutdown returns an error if not writable
                 uv_shutdown_t *req = malloc(sizeof(uv_shutdown_t));
                 int err = uv_shutdown(req, (uv_stream_t*)handle, jl_shutdown_uv_cb);
-                if (err != 0) { printf("shutdown err: %s\n", uv_strerror(uv_last_error(jl_global_event_loop())));}
+                if (err != 0) {
+                    printf("shutdown err: %s\n", uv_strerror(uv_last_error(jl_global_event_loop())));
+                    jl_close_uv(handle);
+                }
             }
             else {
                 jl_close_uv(handle);
@@ -261,7 +289,7 @@ DLLEXPORT void uv_atexit_hook()
         case UV_PROCESS:
         case UV_FS_EVENT:
         case UV_FS_POLL:
-            uv_close(handle,NULL); //do we want to use jl_close_uv?
+            jl_close_uv(handle);
             break;
         case UV_HANDLE:
         case UV_STREAM:
@@ -332,7 +360,6 @@ void *init_stdio_handle(uv_file fd,int readable)
             break;
         case UV_NAMED_PIPE:
         case UV_FILE:
-            if (readable) ios_printf(ios_stderr,"Using pipes/files as STDIN is not yet supported. Proceed with caution!\n");
             handle = malloc(sizeof(uv_pipe_t));
             uv_pipe_init(jl_io_loop, (uv_pipe_t*)handle,(readable?UV_PIPE_READABLE:UV_PIPE_WRITEABLE));
             uv_pipe_open((uv_pipe_t*)handle,fd);
@@ -359,7 +386,7 @@ void julia_init(char *imageFile)
 {
     jl_page_size = getPageSize();
     jl_find_stack_bottom();
-    jl_dl_handle = jl_load_dynamic_library(NULL);
+    jl_dl_handle = jl_load_dynamic_library(NULL, JL_RTLD_DEFAULT);
 #ifdef __WIN32__
     uv_dlopen("ntdll.dll",jl_ntdll_handle); //bypass julia's pathchecking for system dlls
     uv_dlopen("Kernel32.dll",jl_kernel32_handle);
@@ -439,8 +466,9 @@ void julia_init(char *imageFile)
     // the Main module is the one which is always open, and set as the
     // current module for bare (non-module-wrapped) toplevel expressions.
     // it does "using Base" if Base is available.
-    if (jl_base_module != NULL)
-        jl_module_using(jl_main_module, jl_base_module);
+    if (jl_base_module != NULL) {
+        jl_add_standard_imports(jl_main_module);
+    }
     // eval() uses Main by default, so Main.eval === Core.eval
     jl_module_import(jl_main_module, jl_core_module, jl_symbol("eval"));
     jl_current_module = jl_main_module;
@@ -507,9 +535,12 @@ DLLEXPORT void jl_install_sigint_handler()
     //printf("sigint installed\n");
 }
 
-DLLEXPORT
-int julia_trampoline(int argc, char *argv[], int (*pmain)(int ac,char *av[]))
+
+DLLEXPORT int julia_trampoline(int argc, char **argv, int (*pmain)(int ac,char *av[]))
 {
+#ifdef __WIN32__
+    SetUnhandledExceptionFilter(exception_handler);
+#endif
 #ifdef COPY_STACKS
     // initialize base context of root task
     jl_root_task->stackbase = (char*)&argc;

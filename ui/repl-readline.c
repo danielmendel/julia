@@ -55,15 +55,21 @@ static void init_history(void)
         history_file = ".julia_history";
     }
     else {
+        char *histenv = getenv("JULIA_HISTORY");
+        if (histenv) {
+            history_file = histenv;
+        }
+        else {
 #ifndef __WIN32__
-        char *home = getenv("HOME");
-        if (!home) return;
-        asprintf(&history_file, "%s/.julia_history", home);
+            char *home = getenv("HOME");
+            if (!home) return;
+            asprintf(&history_file, "%s/.julia_history", home);
 #else
-        char *home = getenv("AppData");
-        if (!home) return;
-        asprintf(&history_file, "%s/julia/history", home);
+            char *home = getenv("AppData");
+            if (!home) return;
+            asprintf(&history_file, "%s/julia/history", home);
 #endif
+        }
     }
     if (!stat(history_file, &stat_info)) {
         read_history(history_file);
@@ -449,9 +455,7 @@ static jl_module_t *find_submodule_named(jl_module_t *module, const char *name)
 
 static char *strtok_saveptr;
 
-#if defined(_WIN32) && !defined(__MINGW_H)
-#define strtok_r(s,d,p) strtok_s(s,d,p)
-#elif defined(__MINGW_H)
+#if defined(_WIN32)
 char *strtok_r(char *str, const char *delim, char **save)
 {
     char *res, *last;
@@ -480,7 +484,7 @@ static int symtab_get_matches(jl_sym_t *tree, const char *str, char **answer)
     // given str "X.Y.a", set module := X.Y and name := "a"
     jl_module_t *module = NULL;
     char *name = NULL, *strcopy = strdup(str);
-    for (char *s=strcopy, *r;; s=NULL) {
+    for (char *s=strcopy, *r=NULL;; s=NULL) {
         char *t = strtok_r(s, ".", &r);
         if (!t) {
             if (str[strlen(str)-1] == '.') {
@@ -666,13 +670,14 @@ static void init_rl(void)
 #endif
 }
 
-void jl_prep_terminal (int meta_flag)
+void jl_prep_terminal(int meta_flag)
 {
     FILE *rl_in = rl_instream;
     rl_instream = stdin;
     rl_prep_terminal(1);
     rl_instream = rl_in;
 #ifdef __WIN32__
+    if (jl_uv_stdin->type == UV_TTY) uv_tty_set_mode((uv_tty_t*)jl_uv_stdin,1); //raw (and libuv-processed)
     if (!repl_sigint_handler_installed) {
         if (SetConsoleCtrlHandler((PHANDLER_ROUTINE)repl_sigint_handler,1))
             repl_sigint_handler_installed = 1;
@@ -701,6 +706,9 @@ void jl_deprep_terminal ()
     rl_instream = stdin;
     rl_deprep_terminal();
     rl_instream = rl_in;
+#ifdef __WIN32__
+    if (jl_uv_stdin->type == UV_TTY) uv_tty_set_mode((uv_tty_t*)jl_uv_stdin,0); // cooked
+#endif
 }
 
 void init_repl_environment(int argc, char *argv[])
@@ -720,9 +728,9 @@ void init_repl_environment(int argc, char *argv[])
     jl_sigint_act.sa_sigaction = NULL;
 #endif
     rl_catch_signals = 0;
-    rl_prep_term_function=&jl_prep_terminal;
-    rl_deprep_term_function=&jl_deprep_terminal;
-    rl_instream=fopen("/dev/null","r");
+    rl_prep_term_function = &jl_prep_terminal;
+    rl_deprep_term_function = &jl_deprep_terminal;
+    rl_instream = fopen("/dev/null","r");
     prompt_length = strlen(prompt_plain);
     init_history();
     rl_startup_hook = (Function*)init_rl;

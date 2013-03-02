@@ -277,7 +277,7 @@ strwidth(s::ByteString) = ccall(:u8_strwidth, Int, (Ptr{Uint8},), s.data)
 isascii(c::Char) = c < 0x80
 
 for name = ("alnum", "alpha", "blank", "cntrl", "digit", "graph",
-            "lower", "print", "punct", "space", "upper", "xdigit")
+            "lower", "print", "punct", "space", "upper")
     f = symbol(string("is",name))
     @eval ($f)(c::Char) = bool(ccall($(string("isw",name)), Int32, (Char,), c))
 end
@@ -320,7 +320,7 @@ SubString(s::SubString, i::Int, j::Int) = SubString(s.string, s.offset+i, s.offs
 SubString(s::String, i::Integer, j::Integer) = SubString(s, int(i), int(j))
 SubString(s::String, i::Integer) = SubString(s, i, endof(s))
 
-write{T<:ByteString}(to::IOString, s::SubString{T}) = write_sub(to, s.string.data, s.offset+1, s.endof)
+write{T<:ByteString}(to::IOBuffer, s::SubString{T}) = write_sub(to, s.string.data, s.offset+1, s.endof)
 
 function next(s::SubString, i::Int)
     if i < 1 || i > s.endof
@@ -467,8 +467,6 @@ function filter(f::Function, s::String)
     takebuf_string(out)
 end
 
-has(s::String, c::Char) = contains(s, c)
-
 ## string promotion rules ##
 
 promote_rule(::Type{UTF8String} , ::Type{ASCIIString}) = UTF8String
@@ -491,8 +489,8 @@ end
 escape_nul(s::String, i::Int) =
     !done(s,i) && '0' <= next(s,i)[1] <= '7' ? L"\x00" : L"\0"
 
-is_hex_digit(c::Char) = '0'<=c<='9' || 'a'<=c<='f' || 'A'<=c<='F'
-need_full_hex(s::String, i::Int) = !done(s,i) && is_hex_digit(next(s,i)[1])
+isxdigit(c::Char) = '0'<=c<='9' || 'a'<=c<='f' || 'A'<=c<='F'
+need_full_hex(s::String, i::Int) = !done(s,i) && isxdigit(next(s,i)[1])
 
 function print_escaped(io, s::String, esc::String)
     i = start(s)
@@ -621,7 +619,7 @@ function interp_parse(s::String, unescape::Function, printer::Function)
             if !isempty(s[i:j-1])
                 push!(sx, unescape(s[i:j-1]))
             end
-            ex, j = parseatom(s,k)
+            ex, j = parse(s,k,false)
             if isa(ex,Expr) && is(ex.head,:continue)
                 throw(ParseError("incomplete expression"))
             end
@@ -654,14 +652,83 @@ function interp_parse_bytes(s::String)
     interp_parse(s, unescape_string, writer)
 end
 
+## multiline strings ##
+
+let
+global multiline_lstrip
+
+function space_width(c::Char)
+    c == ' '   ? 1 :
+    c == '\t'  ? 8 :
+    isspace(c) ? 0 :
+    error("not a space-like character")
+end
+
+# width of leading space, also check if string is blank
+function indent_width(s::String)
+    count = 0
+    for c in s
+        if isspace(c)
+            count += space_width(c)
+        else
+            return count, false
+        end
+    end
+    count, true
+end
+
+function multiline_lstrip(s::String)
+    lines = split(s, '\n')
+    num_lines = length(lines)
+    if num_lines == 1 return s end
+
+    # discard first line if blank
+    first_line = lstrip(lines[1]) == "" ? 2 : 1
+
+    indent,blank = indent_width(lines[end])
+    if !blank
+        indent = typemax(Int)
+        for line in lines[first_line:end]
+            n,blank = indent_width(line)
+            if !blank
+                indent = min(indent, n)
+            end
+        end
+    end
+
+    buf = memio(endof(s), false)
+    for k in first_line:num_lines
+        line = lines[k]
+        cut = 0
+        i = start(line)
+        while !done(line,i)
+            c, j = next(line,i)
+            if !isspace(c) || cut >= indent
+                for _ = (indent+1):cut write(buf, ' ') end
+                print(buf, line[i:end])
+                break
+            end
+            cut += space_width(c)
+            i = j
+        end
+        if k != num_lines println(buf) end
+    end
+    takebuf_string(buf)
+end
+end # let
+
 ## core string macros ##
 
 macro   str(s); interp_parse(s); end
-macro S_str(s); interp_parse(s); end
 macro I_str(s); interp_parse(s, x->unescape_chars(x,"\"")); end
 macro E_str(s); check_utf8(unescape_string(s)); end
 macro B_str(s); interp_parse_bytes(s); end
 macro b_str(s); ex = interp_parse_bytes(s); :(($ex).data); end
+
+macro   mstr(s...); :(multiline_lstrip(unescape_string(string($(map(esc,s)...))))); end
+macro L_mstr(s); s; end
+macro I_mstr(s); interp_parse(multiline_lstrip(s), x->unescape_chars(x,"\"")); end
+macro E_mstr(s); multiline_lstrip(check_utf8(unescape_string(s))); end
 
 ## shell-like command parsing ##
 
@@ -709,7 +776,7 @@ function shell_parse(raw::String, interp::Bool)
             if isspace(s[k])
                 error("space not allowed right after \$")
             end
-            ex, j = parseatom(s,j)
+            ex, j = parse(s,j,false)
             update_arg(esc(ex)); i = j
         else
             if !in_double_quotes && c == '\''
@@ -810,22 +877,24 @@ shell_escape(cmd::String, args::String...) =
 
 ## interface to parser ##
 
-function parse(s::String, pos, greedy)
+function parse(str::String, pos::Int, greedy::Bool)
     # returns (expr, end_pos). expr is () in case of parse error.
     ex, pos = ccall(:jl_parse_string, Any,
                     (Ptr{Uint8}, Int32, Int32),
-                    s, pos-1, greedy ? 1:0)
+                    str, pos-1, greedy ? 1:0)
     if isa(ex,Expr) && is(ex.head,:error)
         throw(ParseError(ex.args[1]))
     end
     if ex == (); throw(ParseError("end of input")); end
     ex, pos+1 # C is zero-based, Julia is 1-based
 end
+parse(str::String, pos::Int) = parse(str, pos, true)
 
-parse(s::String)          = parse(s, 1, true)
-parse(s::String, pos)     = parse(s, pos, true)
-parseatom(s::String)      = parse(s, 1, false)
-parseatom(s::String, pos) = parse(s, pos, false)
+function parse(str::String)
+    ex, pos = parse(str, start(str))
+    done(str, pos) || error("syntax: extra token after end of expression")
+    return ex
+end
 
 ## miscellaneous string functions ##
 
@@ -898,7 +967,7 @@ function replace(str::ByteString, pattern, repl::Function, limit::Integer)
     i = a = start(str)
     r = search(str,pattern,i)
     j, k = first(r), last(r)+1
-    out = IOString()
+    out = IOBuffer()
     while j != 0
         if i == a || i < k
             write(out, SubString(str,i,j-1))
@@ -917,25 +986,6 @@ end
 replace(s::String, pat, f::Function, n::Integer) = replace(bytestring(s), pat, f, n)
 replace(s::String, pat, r, n::Integer) = replace(s, pat, x->r, n)
 replace(s::String, pat, r) = replace(s, pat, r, 0)
-
-function search_count(str::String, pattern, limit::Integer)
-    n = 0
-    i = a = start(str)
-    r = search(str,pattern,i)
-    j, k = first(r), last(r)+1
-    while j != 0
-        if i == a || i < k
-            n += 1
-            if n == limit break end
-            i = k
-        end
-        if k <= j; k = nextind(str,j) end
-        r = search(str,pattern,k)
-        j, k = first(r), last(r)+1
-    end
-    return n
-end
-search_count(s::String, pat) = search_count(s, pat, 0)
 
 function print_joined(io, strings, delim, last)
     i = start(strings)
@@ -988,11 +1038,11 @@ function chomp!(s::ByteString)
 end
 chomp!(s::String) = chomp(s) # copying fallback for other string types
 
-function lstrip(s::String)
+function lstrip(s::String, chars::String)
     i = start(s)
     while !done(s,i)
         c, j = next(s,i)
-        if !isspace(c)
+        if !contains(chars, c)
             return s[i:end]
         end
         i = j
@@ -1000,12 +1050,12 @@ function lstrip(s::String)
     ""
 end
 
-function rstrip(s::String)
+function rstrip(s::String, chars::String)
     r = reverse(s)
     i = start(r)
     while !done(r,i)
         c, j = next(r,i)
-        if !isspace(c)
+        if !contains(chars, c)
             return s[1:end-i+1]
         end
         i = j
@@ -1013,7 +1063,12 @@ function rstrip(s::String)
     ""
 end
 
+for stripfn in {:lstrip, :rstrip}
+    @eval ($stripfn)(s::String) = ($stripfn)(s, " \f\n\r\t\v")
+end
+
 strip(s::String) = lstrip(rstrip(s))
+strip(s::String, chars::String) = lstrip(rstrip(s, chars), chars)
 
 ## string to integer functions ##
 

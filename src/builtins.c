@@ -263,6 +263,8 @@ JL_CALLABLE(jl_f_apply)
 
 // eval -----------------------------------------------------------------------
 
+extern int jl_lineno;
+
 JL_CALLABLE(jl_f_top_eval)
 {
     jl_module_t *m;
@@ -280,19 +282,24 @@ JL_CALLABLE(jl_f_top_eval)
     if (jl_is_symbol(ex)) {
         return jl_eval_global_var(m, (jl_sym_t*)ex);
     }
-    if (m == jl_current_module) {
-        return jl_toplevel_eval(ex);
-    }
     jl_value_t *v=NULL;
+    int last_lineno = jl_lineno;
+    if (m == jl_current_module) {
+        v = jl_toplevel_eval(ex);
+        jl_lineno = last_lineno;
+        return v;
+    }
     jl_module_t *last_m = jl_current_module;
     JL_TRY {
         jl_current_module = m;
         v = jl_toplevel_eval(ex);
     }
     JL_CATCH {
+        jl_lineno = last_lineno;
         jl_current_module = last_m;
         jl_rethrow();
     }
+    jl_lineno = last_lineno;
     jl_current_module = last_m;
     assert(v);
     return v;
@@ -592,7 +599,7 @@ static void show_function(JL_STREAM *s, jl_value_t *v)
         JL_PUTS(jl_gf_name(v)->name, s);
     }
     else {
-        JL_PUTS("#<function>", s);
+        JL_PUTS("# function", s);
     }
 }
 
@@ -642,7 +649,7 @@ DLLEXPORT void jl_show_any(jl_value_t *str, jl_value_t *v)
         show_function(s, v);
     }
     else if (jl_typeis(v,jl_intrinsic_type)) {
-        JL_PRINTF(s, "#<intrinsic-function %d>", *(uint32_t*)jl_bits_data(v));
+        JL_PRINTF(s, "# intrinsic function %d", *(uint32_t*)jl_bits_data(v));
     }
     else {
         jl_value_t *t = (jl_value_t*)jl_typeof(v);

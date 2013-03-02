@@ -28,6 +28,15 @@ jl_module_t *jl_old_base_module = NULL;
 
 jl_value_t *jl_toplevel_eval_flex(jl_value_t *e, int fast);
 
+void jl_add_standard_imports(jl_module_t *m)
+{
+    // using Base
+    jl_module_using(m, jl_base_module);
+    // importall Base.Operators
+    jl_module_importall(m, (jl_module_t*)jl_get_global(jl_base_module,
+                                                       jl_symbol("Operators")));
+}
+
 extern int base_module_conflict;
 jl_value_t *jl_eval_module_expr(jl_expr_t *ex)
 {
@@ -60,8 +69,9 @@ jl_value_t *jl_eval_module_expr(jl_expr_t *ex)
 
     // add standard imports unless baremodule
     if (std_imports) {
-        if (jl_base_module != NULL)
-            jl_module_using(newm, jl_base_module); // using Base
+        if (jl_base_module != NULL) {
+            jl_add_standard_imports(newm);
+        }
     }
 
     JL_GC_PUSH(&last_module);
@@ -254,18 +264,27 @@ jl_value_t *jl_toplevel_eval_flex(jl_value_t *e, int fast)
     }
 
     // handle import, using, importall, export toplevel-only forms
-    if (ex->head == using_sym || ex->head == importall_sym) {
+    if (ex->head == importall_sym) {
         jl_module_t *m = eval_import_path(ex->args);
         jl_sym_t *name = (jl_sym_t*)jl_cellref(ex->args, jl_array_len(ex->args)-1);
         assert(jl_is_symbol(name));
         m = (jl_module_t*)jl_eval_global_var(m, name);
         if (!jl_is_module(m))
 	    jl_errorf("invalid %s statement: name exists but does not refer to a module", ex->head->name);
-	if (ex->head == using_sym) {
-	    jl_module_using(jl_current_module, m);
-	}
-	else {
-            jl_module_importall(jl_current_module, m);
+        jl_module_importall(jl_current_module, m);
+        return jl_nothing;
+    }
+
+    if (ex->head == using_sym) {
+        jl_module_t *m = eval_import_path(ex->args);
+        jl_sym_t *name = (jl_sym_t*)jl_cellref(ex->args, jl_array_len(ex->args)-1);
+        assert(jl_is_symbol(name));
+        jl_module_t *u = (jl_module_t*)jl_eval_global_var(m, name);
+        if (jl_is_module(u)) {
+            jl_module_using(jl_current_module, u);
+        }
+        else {
+            jl_module_use(jl_current_module, m, name);
         }
         return jl_nothing;
     }
@@ -376,7 +395,7 @@ void jl_parse_eval_all(char *fname)
                 break;
             if (jl_is_expr(form)) {
                 if (((jl_expr_t*)form)->head == jl_continue_sym) {
-                    jl_errorf("syntax error: %s", jl_string_data(jl_exprarg(form,0)));
+                    jl_errorf("syntax: %s", jl_string_data(jl_exprarg(form,0)));
                 }
                 if (((jl_expr_t*)form)->head == error_sym) {
                     jl_interpret_toplevel_expr(form);

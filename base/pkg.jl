@@ -27,7 +27,7 @@ function cd_pkgdir(f::Function)
         if has(ENV,"JULIA_PKGDIR")
             error("Package directory $d doesn't exist; run Pkg.init() to create it.")
         else
-            warn("Initializing default package repository $d.")
+            info("Auto-initializing default package repository $d.")
             init()
         end
     end
@@ -88,7 +88,7 @@ function init(meta::String)
             cd(Git.autoconfig_pushurl,"METADATA")
             Metadata.gen_hashes()
         end
-    catch e 
+    catch e
         run(`rm -rf $d`)
         rethrow(e)
     end
@@ -110,24 +110,31 @@ end
 # add and remove packages by name
 
 add(pkgs::Vector{VersionSet}) = cd_pkgdir() do
-    for pkg in pkgs
-        if !contains(Metadata.packages(),pkg.package)
-            error("Unknown package $(pkg.package); Perhaps you need to Pkg.update() for new metadata?")
-        end
-        reqs = parse_requires("REQUIRE")
-        if anyp(req->req.package==pkg.package,reqs)
-            error("package already required: $pkg")
-        end
-        open("REQUIRE","a") do io
-            print(io,pkg.package)
-            for ver in pkg.versions
-                print(io,"\t$ver")
+    run(`git add REQUIRE`)
+    try
+        for pkg in pkgs
+            if !contains(Metadata.packages(),pkg.package)
+                error("Unknown package $(pkg.package); Perhaps you need to Pkg.update() for new metadata?")
             end
-            println(io)
+            reqs = parse_requires("REQUIRE")
+            if any(req->req.package==pkg.package,reqs)
+                warn("You've already required $pkg, ignoring.")
+                return
+            end
+            open("REQUIRE","a") do io
+                print(io,pkg.package)
+                for ver in pkg.versions
+                    print(io,"\t$ver")
+                end
+                println(io)
+            end
         end
+        _resolve()
+    catch
+        run(`git checkout -- REQUIRE`)
+        rethrow()
     end
     run(`git add REQUIRE`)
-    _resolve()
 end
 function add(pkgs::Union(String,VersionSet)...)
     pkgs_ = VersionSet[]
@@ -138,28 +145,34 @@ function add(pkgs::Union(String,VersionSet)...)
 end
 
 rm(pkgs::Vector{String}) = cd_pkgdir() do
-    for pkg in pkgs
-        if !contains(Metadata.packages(),pkg)
-            error("invalid package: $pkg")
-        end
-        reqs = parse_requires("REQUIRE")
-        if !anyp(req->req.package==pkg,reqs)
-            error("package not required: $pkg")
-        end
-        open("REQUIRE") do r
-            open("REQUIRE.new","w") do w
-                for line in each_line(r)
-                    fields = split(line)
-                    if isempty(fields) || fields[1]!=pkg
-                        print(w,line)
+    run(`git add REQUIRE`)
+    try
+        for pkg in pkgs
+            if !contains(Metadata.packages(),pkg)
+                error("Invalid package: $pkg")
+            end
+            reqs = parse_requires("REQUIRE")
+            if !any(req->req.package==pkg,reqs)
+                error("Package not required: $pkg")
+            end
+            open("REQUIRE") do r
+                open("REQUIRE.new","w") do w
+                    for line in each_line(r)
+                        fields = split(line)
+                        if isempty(fields) || fields[1]!=pkg
+                            print(w,line)
+                        end
                     end
                 end
             end
+            run(`mv REQUIRE.new REQUIRE`)
         end
-        run(`mv REQUIRE.new REQUIRE`)
+        _resolve()
+    catch
+        run(`git checkout -- REQUIRE`)
+        rethrow()
     end
     run(`git add REQUIRE`)
-    _resolve()
 end
 rm(pkgs::String...) = rm(String[pkgs...])
 
@@ -201,7 +214,7 @@ function runbuildscript(pkg)
     if isdir(path)
         cd(path) do
             if isfile("build.jl")
-                info(string("Running build script for package ", pkg))
+                info("Running build script for package $pkg")
                 include("build.jl")
             end
         end
@@ -226,7 +239,7 @@ function _resolve()
         end
     end
     sort!(reqs)
-    want = Resolve.resolve(reqs)
+    want = Resolve.resolve(reqs,["julia"=>VERSION])
     pkgs = sort!(keys(merge(want,have)))
     for pkg in pkgs
         if has(have,pkg)
@@ -239,7 +252,7 @@ function _resolve()
                     oldver = Metadata.version(pkg,have[pkg])
                     newver = Metadata.version(pkg,want[pkg])
                     up = oldver <= newver ? "Up" : "Down"
-                    println("$(up)grading $pkg: v$oldver => v$newver")
+                    info("$(up)grading $pkg: v$oldver => v$newver")
                     cd(pkg) do
                         run(`git checkout -q $(want[pkg])`)
                     end
@@ -248,7 +261,7 @@ function _resolve()
                 end
             else
                 ver = Metadata.version(pkg,have[pkg])
-                println("Removing $pkg v$ver")
+                info("Removing $pkg v$ver")
                 run(`git rm -qrf --cached -- $pkg`)
                 Git.modules(`--remove-section submodule.$pkg`)
                 run(`git add .gitmodules`)
@@ -256,7 +269,7 @@ function _resolve()
             end
         else
             ver = Metadata.version(pkg,want[pkg])
-            println("Installing $pkg: v$ver")
+            info("Installing $pkg v$ver")
             if ispath(pkg)
                 # TODO: maybe if this is a git repo or submodule, just take it over?
                 error("Path $pkg already exists! Please remove to allow installation.")
@@ -337,9 +350,13 @@ function commit(f::Function, msg::String)
     assert_git_clean()
     try f()
     catch
-        print(STDERR,
-              "\n\n*** ERROR ENCOUNTERED ***\n\n",
-              "Rolling back to HEAD...\n")
+        warn("""
+
+             *** ERROR ENCOUNTERED ***
+
+             Rolling back to HEAD...
+
+             """)
         checkout()
         rethrow()
     end
@@ -348,7 +365,7 @@ function commit(f::Function, msg::String)
         run(`git diff --name-only --diff-filter=D HEAD^ HEAD` | `xargs rm -rf`)
         checkout()
     elseif !Git.dirty()
-        println(STDERR, "Nothing to commit.")
+        warn("nothing to commit.")
     else
         error("There are both staged and unstaged changes to packages.")
     end
@@ -395,7 +412,7 @@ pull() = cd_pkgdir() do
     run(`git fetch`)
 
     # see how far git gets with merging
-    if success(`git merge -m "[jul] pull (simple merge)" FETCH_HEAD`) return end
+    success(`git merge -m "[jul] pull (simple merge)" FETCH_HEAD`) && return
 
     # get info about local, remote and base trees
     L = readchomp(`git rev-parse --verify HEAD`)
@@ -411,14 +428,16 @@ pull() = cd_pkgdir() do
         Cc, conflicts, deleted = Git.merge_configs(Bc,Lc,Rc)
         # warn about config conflicts
         for (key,vals) in conflicts
-            print(STDERR,
-                "\nModules config conflict for $key:\n",
-                "  local value  = $(vals[1])\n",
-                "  remote value = $(vals[2])\n",
-                "\n",
-                "Both values written to .gitmodules -- please edit and choose one.\n\n",
-            )
             Cc[key] = vals
+            warn("""
+
+                 Modules config conflict for $key:
+                   local value  = $(vals[1])
+                   remote value = $(vals[2])
+
+                 Both values written to .gitmodules -- please edit and choose one.
+
+                 """)
         end
         # remove submodules that were deleted
         for section in deleted
@@ -448,12 +467,17 @@ pull() = cd_pkgdir() do
     if Git.unstaged()
         unmerged = readall(`git ls-files -m` | `sort` | `uniq`)
         unmerged = replace(unmerged, r"^", "    ")
-        print(STDERR,
-            "\n\n*** WARNING ***\n\n",
-            "You have unresolved merge conflicts in the following files:\n\n",
-            unmerged,
-            "\nPlease resolve these conflicts, `git add` the files, and commit.\n"
-        )
+        warn("""
+
+             *** WARNING ***
+
+             You have unresolved merge conflicts in the following files:
+
+             $unmerged
+
+             Please resolve these conflicts, `git add` the files, and commit.
+
+             """)
         error("pull: merge conflicts")
     end
 
@@ -555,17 +579,23 @@ end
 
 function promptuserinfo()
     if(isempty(chomp(readall(ignorestatus(`git config --global user.name`)))))
-        info("Git would like to know your name to initialize your .julia directory.\nEnter it below:")
+        info("""
+             Git would like to know your name to initialize your .julia directory.
+             Enter it below:
+             """)
         name = chomp(readline(STDIN))
         if(isempty(name))
             error("Could not read name")
         else
             run(`git config --global user.name $name`)
             info("Thank you. You can change it using run(`git config --global user.name NAME`)")
-        end  
+        end
     end
     if(isempty(chomp(readall(ignorestatus(`git config --global user.email`)))))
-        info("Git would like to know your email to initialize your .julia directory.\nEnter it below:")
+        info("""
+             Git would like to know your email to initialize your .julia directory.
+             Enter it below:
+             """)
         email = chomp(readline(STDIN))
         if(isempty(email))
             error("Could not read email")
@@ -585,18 +615,18 @@ function new(pkg::String)
             try
                 pkg_origin(pkg, "origin")
             catch
-                error("
-Your package in
+                error("""
+                      Your package in
 
-    $(newpath)
-    
-is almost ready. But the default remote, \"origin\", does not exist in
-this repository's configuration. To finish the process, run
+                        $newpath
 
-    > Pkg.pkg_origin(", pkg, ", remotename)
+                      is almost ready. But the default remote, "origin", does not exist in
+                      this repository's configuration. To finish the process, run
 
-with the correct remote name for your repository."
-                )
+                        > Pkg.pkg_origin("$pkg", remotename)
+
+                      with the correct remote name for your repository.
+                      """)
             end
         else
             # Create a skeleton package that can be easily filled in
@@ -625,33 +655,26 @@ with the correct remote name for your repository."
             catch
                 error("Unable to initialize contents of new package")
             end
-            println(
-"
-You have created a new package in
+            println("""
+                    You have created a new package in
 
-  $(newpath)
+                      $newpath
 
-When the package is ready to submit, push it to a public repository, set it as
-the remote \"origin\", then run:
+                    When the package is ready to submit, push it to a public repository, set it as
+                    the remote "origin", then run:
 
-  > Pkg.pkg_origin($(pkg))
-  > Pkg.patch($(pkg))
+                      > Pkg.pkg_origin("$pkg")
+                      > Pkg.patch("$pkg")
 
-to prepare METADATA with the details for your package."
-                )
+                    to prepare METADATA with the details for your package.
+                    """)
         end
     end
 end
 
 # Remove local traces of a package (broken due to a bad .new(), for instance)
 obliterate(pkg::String) = cd_pkgdir() do
-    run(`rm -rf $(pkg) $(joinpath("METADATA", pkg))`)
-end
-
-# If a package contains data, make it easy to find its location
-function package_directory(pkg::String)
-    warn("Pkg.package_directory is deprecated, use Pkg.dir instead.")
-    joinpath(dir(), pkg)
+    run(`rm -rf $pkg $(joinpath("METADATA", pkg))`)
 end
 
 # Repository sanity check
@@ -662,10 +685,11 @@ check_repository() = cd_pkgdir() do
         if !isa(err, Resolve.MetadataError)
             rethrow(err)
         end
-        println("Packages with unsatisfiable requirements found:")
+        warning = "Packages with unsatisfiable requirements found:"
         for (v, pp) in err.info
-            println("  $(v.package) v$(v.version) : no valid versions exist for package $pp")
+            warning *= "  $(v.package) v$(v.version) : no valid versions exist for package $pp"
         end
+        warn(warning)
         return false
     end
     return true

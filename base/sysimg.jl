@@ -42,6 +42,8 @@ end
 ## Load essential files and libraries
 
 include("base.jl")
+include("build_h.jl")
+include("c.jl")
 
 # core operations & types
 include("range.jl")
@@ -78,7 +80,7 @@ include("inference.jl")
 
 # I/O, strings & printing
 include("io.jl")
-include("iostring.jl")
+include("iobuffer.jl")
 include("stream.jl")
 include("socket.jl")
 include("fs.jl")
@@ -103,7 +105,6 @@ include("serialize.jl")
 include("multi.jl")
 
 # system & environment
-include("build_h.jl")
 include("osutils.jl")
 include("libc.jl")
 include("env.jl")
@@ -114,6 +115,7 @@ include("path.jl")
 include("stat.jl")
 
 # front end & code loading
+include("repl.jl")
 include("client.jl")
 include("loading.jl")
 
@@ -139,12 +141,13 @@ include("combinatorics.jl")
 include("darray2.jl")
 include("mmap.jl")
 
-# utilities - version, timing, help, edit
+# utilities - version, timing, help, edit, metaprogramming
 include("version.jl")
 include("datafmt.jl")
 include("deepcopy.jl")
 include("util.jl")
 include("test.jl")
+include("meta.jl")
 
 # linear algebra
 include("blas.jl")
@@ -188,7 +191,7 @@ compile_hint(event_loop, (Bool,))
 compile_hint(_start, ())
 compile_hint(process_options, (Array{Any,1},))
 compile_hint(run_repl, ())
-compile_hint(anyp, (Function, Array{Any,1}))
+compile_hint(any, (Function, Array{Any,1}))
 compile_hint(Dict{Any,Any}, (Int,))
 compile_hint(Set, ())
 compile_hint(assign!, (Dict{Any,Any}, Bool, Cmd))
@@ -313,7 +316,7 @@ end # baremodule Base
 
 using Base
 
-let JL_PRIVATE_LIBDIR = try getenv("JL_PRIVATE_LIBDIR") catch e "lib/julia" end
+let JL_PRIVATE_LIBDIR = get(ENV, "JL_PRIVATE_LIBDIR", "lib/julia")
 # create system image file
 ccall(:jl_save_system_image, Void, (Ptr{Uint8},),
       "$JULIA_HOME/../$JL_PRIVATE_LIBDIR/sys.ji")

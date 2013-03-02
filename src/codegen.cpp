@@ -150,6 +150,9 @@ static Function *box8_func;
 static Function *box16_func;
 static Function *box32_func;
 static Function *box64_func;
+#ifdef __WIN32__
+static Function *resetstkoflw_func;
+#endif
 
 /*
   stuff to fix up:
@@ -1655,9 +1658,8 @@ static Value *emit_expr(jl_value_t *expr, jl_codectx_t *ctx, bool isboxed,
         make_gcroot(boxed(a3), ctx);
         Value *mdargs[6] = { name, bp, literal_pointer_val((void*)bnd),
                              a1, a2, a3 };
-        builder.CreateCall(jlmethod_func, ArrayRef<Value*>(&mdargs[0], 6));
         ctx->argDepth = last_depth;
-        return literal_pointer_val((jl_value_t*)jl_nothing);
+        return builder.CreateCall(jlmethod_func, ArrayRef<Value*>(&mdargs[0], 6));
     }
     else if (head == const_sym) {
         jl_sym_t *sym = (jl_sym_t*)args[0];
@@ -1729,18 +1731,36 @@ static Value *emit_expr(jl_value_t *expr, jl_codectx_t *ctx, bool isboxed,
         Value *jbuf = builder.CreateGEP((*ctx->handlers)[labl],
                                         ConstantInt::get(T_size,0));
         builder.CreateCall(jlenter_func, jbuf);
+#ifndef __WIN32__
         Value *sj = builder.CreateCall2(setjmp_func, jbuf, ConstantInt::get(T_int32,0));
+#else
+        Value *sj = builder.CreateCall(setjmp_func, jbuf);
+#endif
         Value *isz = builder.CreateICmpEQ(sj, ConstantInt::get(T_int32,0));
         BasicBlock *tryblk = BasicBlock::Create(getGlobalContext(), "try",
                                                 ctx->f);
         BasicBlock *handlr = (*ctx->labels)[labl];
         assert(handlr);
+#ifdef __WIN32__
+        BasicBlock *cond_resetstkoflw_blk = BasicBlock::Create(getGlobalContext(), "cond_resetstkoflw", ctx->f);
+        BasicBlock *resetstkoflw_blk = BasicBlock::Create(getGlobalContext(), "resetstkoflw", ctx->f);
+        builder.CreateCondBr(isz, tryblk, cond_resetstkoflw_blk);
+        builder.SetInsertPoint(cond_resetstkoflw_blk);
+        builder.CreateCondBr(builder.CreateICmpEQ(
+                    literal_pointer_val(jl_stackovf_exception),
+                    builder.CreateLoad(jlexc_var, true)),
+                resetstkoflw_blk, handlr);
+        builder.SetInsertPoint(resetstkoflw_blk);
+        builder.CreateCall(resetstkoflw_func);
+        builder.CreateBr(handlr);
+#else
         builder.CreateCondBr(isz, tryblk, handlr);
+#endif
         builder.SetInsertPoint(tryblk);
     }
     else {
         if (!strcmp(head->name, "$"))
-            jl_error("syntax error: prefix $ in non-quoted expression");
+            jl_error("syntax: prefix $ in non-quoted expression");
         // some expression types are metadata and can be ignored
         if (valuepos || !(head == line_sym || head == type_goto_sym)) {
             jl_errorf("unsupported or misplaced expression %s in function %s",
@@ -2534,6 +2554,7 @@ static void init_julia_llvm_env(Module *m)
         (Function*)jl_Module->getOrInsertFunction("jl_throw_with_superfluous_argument",
                                                   FunctionType::get(T_void, args2_throw, false));
     jlthrow_line_func->setDoesNotReturn();
+    jl_ExecutionEngine->addGlobalMapping(jlthrow_line_func, (void*)&jl_throw_with_superfluous_argument);
 
     jlnew_func =
         Function::Create(FunctionType::get(jl_pvalue_llvmt, args1_, false),
@@ -2544,7 +2565,9 @@ static void init_julia_llvm_env(Module *m)
 
     std::vector<Type*> args2(0);
     args2.push_back(T_pint8);
+#ifndef __WIN32__
     args2.push_back(T_int32);
+#endif
     setjmp_func =
         Function::Create(FunctionType::get(T_int32, args2, false),
                          Function::ExternalLinkage, "sigsetjmp", jl_Module);
@@ -2640,6 +2663,12 @@ static void init_julia_llvm_env(Module *m)
                          Function::ExternalLinkage,
                          "jl_enter_handler", jl_Module);
     jl_ExecutionEngine->addGlobalMapping(jlenter_func, (void*)&jl_enter_handler);
+
+#ifdef __WIN32__
+    resetstkoflw_func = Function::Create(FunctionType::get(T_void, false),
+            Function::ExternalLinkage, "_resetstkoflw", jl_Module);
+    jl_ExecutionEngine->addGlobalMapping(resetstkoflw_func, (void*)&_resetstkoflw);
+#endif
 
     std::vector<Type*> lhargs(0);
     lhargs.push_back(T_int32);

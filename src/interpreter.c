@@ -67,6 +67,7 @@ jl_value_t *jl_eval_global_var(jl_module_t *m, jl_sym_t *e)
 }
 
 extern int jl_boot_file_loaded;
+extern int inside_typedef;
 
 static jl_value_t *eval(jl_value_t *e, jl_value_t **locals, size_t nl)
 {
@@ -179,7 +180,7 @@ static jl_value_t *eval(jl_value_t *e, jl_value_t **locals, size_t nl)
         jl_method_def(fname, bp, b, (jl_tuple_t*)atypes,
                       (jl_function_t*)meth, (jl_tuple_t*)tvars);
         JL_GC_POP();
-        return jl_nothing;
+        return *bp;
     }
     else if (ex->head == const_sym) {
         jl_value_t *sym = args[0];
@@ -248,7 +249,9 @@ static jl_value_t *eval(jl_value_t *e, jl_value_t **locals, size_t nl)
         st->ctor_factory = eval(args[3], locals, nl);
         jl_binding_t *b = jl_get_binding_wr(jl_current_module, (jl_sym_t*)name);
         jl_checked_assignment(b, (jl_value_t*)st);
+        inside_typedef = 1;
         st->types = (jl_tuple_t*)eval(args[5], locals, nl);
+        inside_typedef = 0;
         jl_check_type_tuple(st->types, st->name->name, "type definition");
         super = eval(args[4], locals, nl);
         jl_set_tag_type_super((jl_tag_type_t*)st, super);
@@ -280,7 +283,7 @@ static jl_value_t *eval(jl_value_t *e, jl_value_t **locals, size_t nl)
     }
     else if (ex->head == error_sym || ex->head == jl_continue_sym) {
         if (jl_is_byte_string(args[0]))
-            jl_errorf("syntax error: %s", jl_string_data(args[0]));
+            jl_errorf("syntax: %s", jl_string_data(args[0]));
         jl_throw(args[0]);
     }
     jl_errorf("unsupported or misplaced expression %s", ex->head->name);

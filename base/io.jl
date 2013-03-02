@@ -215,9 +215,7 @@ else
     typealias FileOffset Int64
 end
 
-abstract Stream <: IO
-
-type IOStream <: Stream
+type IOStream <: IO
     handle::Ptr{Void}
     ios::Array{Uint8,1}
     name::String
@@ -402,7 +400,7 @@ function repr(x)
     takebuf_string(s)
 end
 
-write(x) = write(OUTPUT_STREAM::IOStream, x)
+write(x) = write(OUTPUT_STREAM::IO, x)
 
 function readuntil(s::IOStream, delim::Uint8)
     ccall(:jl_readuntil, Array{Uint8,1}, (Ptr{Void}, Uint8), s.ios, delim)

@@ -34,7 +34,7 @@ override OS = WINNT
 override ARCH = i686
 override OPENBLAS_DYNAMIC_ARCH = 1
 override CROSS_COMPILE=$(XC_HOST)-
-export WINEPATH := $(BUILD)/lib/julia;$(BUILD)/lib;$(shell $(CROSS_COMPILE)gcc -print-search-dirs | grep programs | sed 's/^programs: =//' | sed 's/:/;/g')
+export WINEPATH := '$(BUILD)/lib/julia;$(BUILD)/lib;$(shell $(CROSS_COMPILE)gcc -print-search-dirs | grep programs | sed "s/^programs: =//" | sed "s/:/;/g");C:\\MinGW\\bin;C:\\MinGW\\msys\\1.0\\bin'
 else
 $(error "unknown XC_HOST variable set")
 endif
@@ -53,7 +53,7 @@ endif
 USE_MKL = 0
 MKLLIB = /path/to/mkl/lib/intel64
 
-# ATLAS must have been previously built with "make -C deps build-atlas" (without -jN),
+# ATLAS must have been previously built with "make -C deps compile-atlas" (without -jN),
 # or installed to usr/lib/libatlas from some another source (built as
 # a shared library, for your platform, single threaded)
 USE_ATLAS = 0
@@ -68,6 +68,7 @@ ifeq ($(OS), WINNT)
 fPIC = 
 PATH := ${PATH}:${BUILD}/lib:${BUILD}/lib/julia
 EXE = .exe
+export OPENBLAS_NUM_THREADS=1
 else
 fPIC = -fPIC
 EXE =
@@ -88,8 +89,9 @@ USECLANG = 0
 endif
 
 ifeq ($(OS), Darwin)
-OSVER = $(shell uname -r | cut -b 1-2)
-ifeq ($(OSVER), 10)
+DARWINVER = $(shell uname -r | cut -b 1-2)
+OSXVER = $(shell sw_vers -productVersion | cut -b 1-4)
+ifeq ($(DARWINVER), 10)
 USEGCC = 1
 USECLANG = 0
 else
@@ -154,13 +156,21 @@ USE_SYSTEM_FFTW=0
 USE_SYSTEM_GMP=0
 USE_SYSTEM_ARPACK=0
 USE_SYSTEM_SUITESPARSE=0
-USE_SYSTEM_GLPK=0
 USE_SYSTEM_LIGHTTPD=0
 USE_SYSTEM_NGINX=0
 USE_SYSTEM_ZLIB=0
 
 ifeq (exists, $(shell [ -e $(JULIAHOME)/Make.user ] && echo exists ))
 include $(JULIAHOME)/Make.user
+endif
+
+# Snow Leopard specific configuration
+ifeq ($(OS), Darwin)
+ifeq ($(OSXVER), 10.6)
+USE_SYSTEM_LIBM = 1
+USE_SYSTEM_BLAS = 1
+USE_SYSTEM_LAPACK = 1
+endif
 endif
 
 # ===========================================================================
@@ -281,7 +291,7 @@ else
 endif
 
 ifeq ($(OS), Linux)
-OSLIBS += -ldl -lrt -Wl,--export-dynamic -Wl,--version-script=$(JULIAHOME)/src/julia.expmap -Wl,--no-whole-archive $(LIBUNWIND)
+OSLIBS += -ldl -lrt -lpthread -Wl,--export-dynamic -Wl,--version-script=$(JULIAHOME)/src/julia.expmap -Wl,--no-whole-archive $(LIBUNWIND)
 JLDFLAGS = -Wl,-Bdynamic
 endif
 
@@ -372,7 +382,6 @@ JULIA_EXECUTABLE = $(JULIA_EXECUTABLE_release)
 else
 JULIA_EXECUTABLE = $(JULIAHOME)/julia
 endif
-
 
 # Colors for make
 ifndef USE_QUIET

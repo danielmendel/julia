@@ -72,8 +72,8 @@ function (*){Tv,Ti}(A::SparseMatrixCSC{Tv,Ti}, B::SparseMatrixCSC{Tv,Ti})
     x  = zeros(Tv, mA)
     for i in 1:nB
         if ip + mA - 1 > nnzC
-            rowvalC = grow!(rowvalC, max(nnzC,mA))
-            nzvalC = grow!(nzvalC, max(nnzC,mA))
+            resize!(rowvalC, nnzC + max(nnzC,mA))
+            resize!(nzvalC, nnzC + max(nnzC,mA))
             nnzC = length(nzvalC)
         end
         colptrC[i] = ip
@@ -490,13 +490,13 @@ end
 
 function issym(A::SparseMatrixCSC)
     m, n = size(A)
-    if m != n; error("matrix must be square, got $(m)x$(n)"); end
+    if m != n; return false; end
     return nnz(A - A.') == 0
 end
 
 function ishermitian(A::SparseMatrixCSC)
     m, n = size(A)
-    if m != n; error("matrix must be square, got $(m)x$(n)"); end
+    if m != n; return false; end
     return nnz(A - A') == 0
 end
 
