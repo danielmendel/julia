@@ -6,6 +6,9 @@ time() = ccall(:clock_now, Float64, ())
 # high-resolution relative time, in nanoseconds
 time_ns() = ccall(:jl_hrtime, Uint64, ())
 
+# total number of bytes allocated so far
+gc_bytes() = ccall(:jl_gc_total_bytes, Csize_t, ())
+
 function tic()
     t0 = time_ns()
     task_local_storage(:TIMERS, (t0, get(task_local_storage(), :TIMERS, ())))
@@ -32,10 +35,12 @@ end
 # print elapsed time, return expression value
 macro time(ex)
     quote
+        local b0 = gc_bytes()
         local t0 = time_ns()
         local val = $(esc(ex))
         local t1 = time_ns()
-        println("elapsed time: ", (t1-t0)/1e9, " seconds")
+        local b1 = gc_bytes()
+        println("elapsed time: ", (t1-t0)/1e9, " seconds (", int(b1-b0), " bytes allocated)")
         val
     end
 end
@@ -49,22 +54,25 @@ macro elapsed(ex)
     end
 end
 
-# print nothing, return value & elapsed time
-macro timed(ex)
+# measure bytes allocated without any contamination from compilation
+macro allocated(ex)
     quote
-        local t0 = time_ns()
+        local b0 = gc_bytes()
         local val = $(esc(ex))
-        val, (time_ns()-t0)/1e9
+        int(gc_bytes()-b0)
     end
 end
 
-function peakflops(n=2000)
-    a = rand(n,n)
-    t = @elapsed a*a
-    t = @elapsed a*a
-    floprate = (2.0*float64(n)^3/t)
-    println("The peak flop rate is ", floprate*1e-9, " gigaflops")
-    floprate
+# print nothing, return value, elapsed time & bytes allocated
+macro timed(ex)
+    quote
+        local b0 = gc_bytes()
+        local t0 = time_ns()
+        local val = $(esc(ex))
+        local t1 = time_ns()
+        local b1 = gc_bytes()
+        val, (t1-t0)/1e9, int(b1-b0)
+    end
 end
 
 # searching definitions
@@ -76,8 +84,8 @@ function whicht(f, types)
             d = f.env.defs
             while !is(d,())
                 if is(d.func.code, lsd)
-                    print(OUTPUT_STREAM, f.env.name)
-                    show(OUTPUT_STREAM, d); println(OUTPUT_STREAM)
+                    print(STDOUT, f.env.name)
+                    show(STDOUT, d); println(STDOUT)
                     return
                 end
                 d = d.next
@@ -191,15 +199,38 @@ function warn_once(msg::String...; depth=0)
     warn(msg; depth=depth+1)
 end
 
-# openblas utility routines
+# BLAS utility routines
+function blas_vendor()
+    try
+        cglobal((:openblas_set_num_threads, Base.libblas_name), Void)
+        return :openblas
+    end
+    try
+        cglobal((:MKL_Set_Num_Threads, Base.libblas_name), Void)
+        return :mkl
+    end
+    return :unknown
+end
 
-if Base.libblas_name == "libopenblas"
+openblas_get_config() = chop(bytestring( ccall((:openblas_get_config, Base.libblas_name), Ptr{Uint8}, () )))
 
-    openblas_get_config() = chop(bytestring( ccall((:openblas_get_config, Base.libblas_name), Ptr{Uint8}, () )))
+function blas_set_num_threads(n::Integer)
+    blas = blas_vendor()
+    if blas == :openblas
+        return ccall((:openblas_set_num_threads, Base.libblas_name), Void, (Int32,), n)
+    elseif blas == :mkl
+        # MKL may let us set the number of threads in several ways
+        return ccall((:MKL_Set_Num_Threads, Base.libblas_name), Void, (Cint,), n)
+    end
 
-    openblas_set_num_threads(n::Integer) = ccall((:openblas_set_num_threads, Base.libblas_name), Void, (Int32, ), n)
+    # OSX BLAS looks at an environment variable
+    @osx_only ENV["VECLIB_MAXIMUM_THREADS"] = n
 
-    function check_openblas()
+    return nothing
+end
+
+function check_blas()
+    if blas_vendor() == :openblas
         openblas_config = openblas_get_config()
         openblas64 = ismatch(r".*USE64BITINT.*", openblas_config)
         if Base.USE_BLAS64 != openblas64
@@ -216,12 +247,11 @@ if Base.libblas_name == "libopenblas"
             quit()
         end
     end
-
 end
 
 # system information
 
-function versioninfo(io::IO=OUTPUT_STREAM, verbose::Bool=false)
+function versioninfo(io::IO=STDOUT, verbose::Bool=false)
     println(io,             "Julia $version_string")
     println(io,             commit_string)
     println(io,             "Platform Info:")
@@ -240,9 +270,9 @@ function versioninfo(io::IO=OUTPUT_STREAM, verbose::Bool=false)
         println(io          )
         println(io,         Sys.cpu_info())
     end
-    if Base.libblas_name == "libopenblas"
+    if Base.libblas_name == "libopenblas" || blas_vendor() == :openblas
         openblas_config = openblas_get_config()
-        println(io,         "  BLAS: ",libblas_name, " (", openblas_config, ")")
+        println(io,         "  BLAS: libopenblas (", openblas_config, ")")
     else
         println(io,         "  BLAS: ",libblas_name)
     end
@@ -281,10 +311,10 @@ function methodswith(io::IO, t::Type, m::Module, showparents::Bool)
     end
 end
 
-methodswith(t::Type, m::Module, showparents::Bool) = methodswith(OUTPUT_STREAM, t, m, showparents)
-methodswith(t::Type, showparents::Bool) = methodswith(OUTPUT_STREAM, t, showparents)
-methodswith(t::Type, m::Module) = methodswith(OUTPUT_STREAM, t, m, false)
-methodswith(t::Type) = methodswith(OUTPUT_STREAM, t, false)
+methodswith(t::Type, m::Module, showparents::Bool) = methodswith(STDOUT, t, m, showparents)
+methodswith(t::Type, showparents::Bool) = methodswith(STDOUT, t, showparents)
+methodswith(t::Type, m::Module) = methodswith(STDOUT, t, m, false)
+methodswith(t::Type) = methodswith(STDOUT, t, false)
 function methodswith(io::IO, t::Type, showparents::Bool)
     mainmod = current_module()
     # find modules in Main
@@ -299,5 +329,39 @@ function methodswith(io::IO, t::Type, showparents::Bool)
 end
 
 # Conditional usage of packages and modules
-usingmodule(name::Symbol) = eval(current_module(), Expr(:toplevel, Expr(:using, name)))
-usingmodule(name::String) = usingmodule(symbol(name))
+usingmodule(names::Symbol...) = eval(current_module(), Expr(:toplevel, Expr(:using, names...)))
+usingmodule(names::String) = usingmodule([symbol(name) for name in split(names,".")]...)
+
+
+macro timedwait(ex, wait_secs, poll_interval)
+    quote
+        start = time()
+        done = RemoteRef()
+        function timercb(aw, status)
+            try
+                if $(esc(ex))
+                    put(done, :ok)
+                elseif (time() - start) > $(wait_secs)
+                    put(done, :timed_out)
+                elseif status != 0
+                    put(done, :error)
+                end
+            catch e
+                put(done, :error)
+                stop_timer(aw)
+            end
+        end
+
+        if !$(esc(ex))
+            t = TimeoutAsyncWork(timercb)
+            start_timer(t, $(poll_interval), $(poll_interval))
+            ret = fetch(done)
+            stop_timer(t)
+        else
+            ret = :ok
+        end
+        ret
+    end
+end
+
+

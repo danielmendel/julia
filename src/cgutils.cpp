@@ -65,8 +65,6 @@ static Type *julia_struct_to_llvm(jl_value_t *jt);
 static Type *julia_type_to_llvm(jl_value_t *jt)
 {
     if (jt == (jl_value_t*)jl_bool_type) return T_int1;
-    if (jt == (jl_value_t*)jl_float32_type) return T_float32;
-    if (jt == (jl_value_t*)jl_float64_type) return T_float64;
     if (jt == (jl_value_t*)jl_bottom_type) return T_void;
     if (!jl_is_leaf_type(jt))
         return jl_pvalue_llvmt;
@@ -79,12 +77,21 @@ static Type *julia_type_to_llvm(jl_value_t *jt)
         return PointerType::get(lt, 0);
     }
     if (jl_is_bitstype(jt)) {
-        int nb = jl_datatype_size(jt)*8;
-        if (nb == 8)  return T_int8;
-        if (nb == 16) return T_int16;
-        if (nb == 32) return T_int32;
-        if (nb == 64) return T_int64;
-        else          return Type::getIntNTy(getGlobalContext(), nb);
+        int nb = jl_datatype_size(jt);
+        if(jl_is_floattype(jt)) {
+#ifndef DISABLE_FLOAT16
+            if(nb == 2)
+                return Type::getHalfTy(jl_LLVMContext);
+            else 
+#endif
+            if(nb == 4)
+                return Type::getFloatTy(jl_LLVMContext);
+            else if(nb == 8)
+                return Type::getDoubleTy(jl_LLVMContext);
+            else if(nb == 16)
+                return Type::getFP128Ty(jl_LLVMContext);
+        }
+        return Type::getIntNTy(jl_LLVMContext, nb*8);
     }
     if (jl_isbits(jt)) {
         if (((jl_datatype_t*)jt)->size == 0) {
@@ -245,11 +252,6 @@ static Value *mark_julia_type(Value *v, jl_value_t *jt)
     return v;
 }
 
-static Value *mark_julia_type(Value *v, jl_datatype_t *jt)
-{
-    return mark_julia_type(v, (jl_value_t*)jt);
-}
-
 // --- generating various error checks ---
 
 static jl_value_t *llvm_type_to_julia(Type *t, bool err=true);
@@ -274,7 +276,7 @@ static Value *emit_typeof(Value *p)
     return literal_pointer_val(julia_type_of(p));
 }
 
-static void emit_error(const std::string &txt, jl_codectx_t *ctx)
+static void just_emit_error(const std::string &txt, jl_codectx_t *ctx)
 {
     Value *zeros[2] = { ConstantInt::get(T_int32, 0),
                         ConstantInt::get(T_int32, 0) };
@@ -283,13 +285,22 @@ static void emit_error(const std::string &txt, jl_codectx_t *ctx)
                                          ArrayRef<Value*>(zeros)));
 }
 
+static Value *emit_error(const std::string &txt, jl_codectx_t *ctx)
+{
+    just_emit_error(txt, ctx);
+    Value *v = builder.CreateUnreachable();
+    BasicBlock *cont = BasicBlock::Create(getGlobalContext(),"after_error",ctx->f);
+    builder.SetInsertPoint(cont);
+    return v;
+}
+
 static void error_unless(Value *cond, const std::string &msg, jl_codectx_t *ctx)
 {
     BasicBlock *failBB = BasicBlock::Create(getGlobalContext(),"fail",ctx->f);
     BasicBlock *passBB = BasicBlock::Create(getGlobalContext(),"pass");
     builder.CreateCondBr(cond, passBB, failBB);
     builder.SetInsertPoint(failBB);
-    emit_error(msg, ctx);
+    just_emit_error(msg, ctx);
     builder.CreateUnreachable();
     ctx->f->getBasicBlockList().push_back(passBB);
     builder.SetInsertPoint(passBB);
@@ -371,8 +382,10 @@ static Value *emit_bounds_check(Value *i, Value *len, jl_codectx_t *ctx)
 {
     Value *im1 = builder.CreateSub(i, ConstantInt::get(T_size, 1));
 #if CHECK_BOUNDS==1
-    Value *ok = builder.CreateICmpULT(im1, len);
-    raise_exception_unless(ok, jlboundserr_var, ctx);
+    if (ctx->boundsCheck.empty() || ctx->boundsCheck.back()==true) {
+        Value *ok = builder.CreateICmpULT(im1, len);
+        raise_exception_unless(ok, jlboundserr_var, ctx);
+    }
 #endif
     return im1;
 }
@@ -471,7 +484,8 @@ static Value *julia_bool(Value *cond)
 
 // --- get the inferred type of an AST node ---
 
-static jl_value_t *static_eval(jl_value_t *ex, jl_codectx_t *ctx, bool sparams=true);
+static jl_value_t *static_eval(jl_value_t *ex, jl_codectx_t *ctx, bool sparams=true,
+                               bool allow_alloc=true);
 
 static inline jl_module_t *topmod(jl_codectx_t *ctx)
 {
@@ -654,11 +668,9 @@ static Value *emit_arrayptr(Value *t, jl_value_t *ex, jl_codectx_t *ctx)
 
 static Value *emit_arraysize(Value *t, jl_value_t *ex, int dim, jl_codectx_t *ctx)
 {
-    if (dim == 1) {
-        jl_arrayvar_t *av = arrayvar_for(ex, ctx);
-        if (av!=NULL)
-            return builder.CreateLoad(av->nr);
-    }
+    jl_arrayvar_t *av = arrayvar_for(ex, ctx);
+    if (av != NULL && dim <= (int)av->sizes.size())
+        return builder.CreateLoad(av->sizes[dim-1]);
     return emit_arraysize(t, dim);
 }
 
@@ -667,7 +679,8 @@ static void assign_arrayvar(jl_arrayvar_t &av, Value *ar)
     builder.CreateStore(builder.CreateBitCast(emit_arrayptr(ar),T_pint8),
                         av.dataptr);
     builder.CreateStore(emit_arraylen_prim(ar, av.ty), av.len);
-    builder.CreateStore(emit_arraysize(ar,1), av.nr);
+    for(size_t i=0; i < av.sizes.size(); i++)
+        builder.CreateStore(emit_arraysize(ar,i+1), av.sizes[i]);
 }
 
 static Value *data_pointer(Value *x)
@@ -681,9 +694,13 @@ static Value *emit_array_nd_index(Value *a, jl_value_t *ex, size_t nd, jl_value_
 {
     Value *i = ConstantInt::get(T_size, 0);
     Value *stride = ConstantInt::get(T_size, 1);
+    bool bc = ctx->boundsCheck.empty() || ctx->boundsCheck.back()==true;
 #if CHECK_BOUNDS==1
-    BasicBlock *failBB = BasicBlock::Create(getGlobalContext(), "oob");
-    BasicBlock *endBB = BasicBlock::Create(getGlobalContext(), "idxend");
+    BasicBlock *failBB=NULL, *endBB=NULL;
+    if (bc) {
+        failBB = BasicBlock::Create(getGlobalContext(), "oob");
+        endBB = BasicBlock::Create(getGlobalContext(), "idxend");
+    }
 #endif
     for(size_t k=0; k < nidxs; k++) {
         Value *ii = emit_unbox(T_size, T_psize, emit_unboxed(args[k], ctx));
@@ -693,28 +710,32 @@ static Value *emit_array_nd_index(Value *a, jl_value_t *ex, size_t nd, jl_value_
             Value *d =
                 k >= nd ? ConstantInt::get(T_size, 1) : emit_arraysize(a, ex, k+1, ctx);
 #if CHECK_BOUNDS==1
-            BasicBlock *okBB = BasicBlock::Create(getGlobalContext(), "ib");
-            // if !(i < d) goto error
-            builder.CreateCondBr(builder.CreateICmpULT(ii, d), okBB, failBB);
-            ctx->f->getBasicBlockList().push_back(okBB);
-            builder.SetInsertPoint(okBB);
+            if (bc) {
+                BasicBlock *okBB = BasicBlock::Create(getGlobalContext(), "ib");
+                // if !(i < d) goto error
+                builder.CreateCondBr(builder.CreateICmpULT(ii, d), okBB, failBB);
+                ctx->f->getBasicBlockList().push_back(okBB);
+                builder.SetInsertPoint(okBB);
+            }
 #endif
             stride = builder.CreateMul(stride, d);
         }
     }
 #if CHECK_BOUNDS==1
-    Value *alen = emit_arraylen(a, ex, ctx);
-    // if !(i < alen) goto error
-    builder.CreateCondBr(builder.CreateICmpULT(i, alen), endBB, failBB);
+    if (bc) {
+        Value *alen = emit_arraylen(a, ex, ctx);
+        // if !(i < alen) goto error
+        builder.CreateCondBr(builder.CreateICmpULT(i, alen), endBB, failBB);
 
-    ctx->f->getBasicBlockList().push_back(failBB);
-    builder.SetInsertPoint(failBB);
-    builder.CreateCall2(jlthrow_line_func, builder.CreateLoad(jlboundserr_var),
-                        ConstantInt::get(T_int32, ctx->lineno));
-    builder.CreateUnreachable();
+        ctx->f->getBasicBlockList().push_back(failBB);
+        builder.SetInsertPoint(failBB);
+        builder.CreateCall2(jlthrow_line_func, builder.CreateLoad(jlboundserr_var),
+                            ConstantInt::get(T_int32, ctx->lineno));
+        builder.CreateUnreachable();
 
-    ctx->f->getBasicBlockList().push_back(endBB);
-    builder.SetInsertPoint(endBB);
+        ctx->f->getBasicBlockList().push_back(endBB);
+        builder.SetInsertPoint(endBB);
+    }
 #endif
 
     return i;

@@ -115,7 +115,7 @@ end
 @deprecate  squeeze(A)              squeeze(A,find([size(A)...].==1))
 @deprecate  getenv(var)             ENV[var]
 @deprecate  hasenv(var)             has(ENV,var)
-@deprecate  setenv(var,val)         ENV[var] = val
+@deprecate  setenv(var::ByteString,val::ByteString)         ENV[var] = val
 @deprecate  unsetenv(var)           delete!(ENV,var)
 
 function svd(a::StridedMatrix, vecs::Bool, thin::Bool)
@@ -144,7 +144,7 @@ export IOString
 const PipeString = PipeBuffer
 export PipeString
 
-# @spawnlocal deprecated
+# @spawnlocal discontinued
 
 # 0.2
 
@@ -214,8 +214,25 @@ export PipeString
 @deprecate  (&)(s::IntSet, s2::IntSet)   intersect(s, s2)
 @deprecate  -(a::IntSet, b::IntSet)      setdiff(a,b)
 @deprecate  ~(s::IntSet)                 complement(s)
+@deprecate openblas_set_num_threads      blas_set_num_threads
+@deprecate check_openblas                check_blas
+@deprecate msync(A::Array, flags::Int)    msync(A)
+@deprecate msync(A::BitArray, flags::Int) msync(A)
+@deprecate square(x::Number)          x*x
 
-# Redirection Operators
+deprecated_ls() = run(`ls -l`)
+deprecated_ls(args::Cmd) = run(`ls -l $args`)
+deprecated_ls(args::String...) = run(`ls -l $args`)
+function ls(args...)
+    warn_once("ls() is deprecated, use readdir() instead. If you are at the repl prompt, consider `;ls`.")
+    deprecated_ls(args...)
+end
+function start_timer(timer::TimeoutAsyncWork, timeout::Int, repeat::Int)
+    warn_once("start_timer now expects arguments in units of seconds. you may need to update your code")
+    invoke(start_timer, (TimeoutAsyncWork,Real,Real), timer, timeout, repeat)
+end
+
+# redirection operators
 @deprecate |(a::AbstractCmd,b::AbstractCmd) (a|>b)
 @deprecate >(a::Redirectable,b::AbstractCmd) (a|>b)
 @deprecate >(a::String,b::AbstractCmd) (a|>b)
@@ -228,7 +245,6 @@ export PipeString
 
 # note removed macros: str, B_str, I_str, E_str, L_str, L_mstr, I_mstr, E_mstr
 
-# renamings
 const ref = getindex
 export ref
 const assign = setindex!
@@ -238,3 +254,107 @@ export assign
 
 typealias ComplexPair Complex
 export ComplexPair
+
+# superseded sorting API
+
+@deprecate select(v::AbstractVector,k::Union(Int,Range1),o::Ordering) select(v,k,order=o)
+@deprecate select(v::AbstractVector,k::Union(Int,Range1),f::Function) select(v,k,lt=f)
+@deprecate select(f::Function,v::AbstractVector,k::Union(Int,Range1)) select(v,k,lt=f)
+
+# @deprecate select!(v::AbstractVector,k::Union(Int,Range1),o::Ordering) select!(v,k,order=o)
+@deprecate select!(v::AbstractVector,k::Union(Int,Range1),f::Function) select!(v,k,lt=f)
+@deprecate select!(f::Function,v::AbstractVector,k::k::Union(Int,Range1)) select!(v,k,lt=f)
+
+@deprecate sort(v::AbstractVector,o::Ordering) sort(v,order=o)
+@deprecate sort(v::AbstractVector,a::Algorithm) sort(v,alg=a)
+@deprecate sort(v::AbstractVector,a::Algorithm,o::Ordering) sort(v,alg=a,order=o)
+@deprecate sort(v::AbstractVector,o::Ordering,a::Algorithm) sort(v,alg=a,order=o)
+@deprecate sort(v::AbstractVector,f::Function) sort(v,lt=f)
+@deprecate sort(v::AbstractVector,a::Algorithm,f::Function) sort(v,alg=a,lt=f)
+@deprecate sort(v::AbstractVector,f::Function,a::Algorithm) sort(v,alg=a,lt=f)
+@deprecate sort(f::Function,v::AbstractVector,a::Algorithm) sort(v,alg=a,lt=f)
+
+@deprecate sort!(v::AbstractVector,o::Ordering) sort!(v,order=o)
+@deprecate sort!(v::AbstractVector,a::Algorithm) sort!(v,alg=a)
+# @deprecate sort!(v::AbstractVector,a::Algorithm,o::Ordering) sort!(v,alg=a,order=o)
+@deprecate sort!(v::AbstractVector,o::Ordering,a::Algorithm) sort!(v,alg=a,order=o)
+@deprecate sort!(v::AbstractVector,f::Function) sort!(v,lt=f)
+@deprecate sort!(v::AbstractVector,a::Algorithm,f::Function) sort!(v,alg=a,lt=f)
+@deprecate sort!(v::AbstractVector,f::Function,a::Algorithm) sort!(v,alg=a,lt=f)
+@deprecate sort!(f::Function,v::AbstractVector,a::Algorithm) sort!(v,alg=a,lt=f)
+
+@deprecate sortperm(v::AbstractVector,o::Ordering) sortperm(v,order=o)
+@deprecate sortperm(v::AbstractVector,a::Algorithm) sortperm(v,alg=a)
+@deprecate sortperm(v::AbstractVector,a::Algorithm,o::Ordering) sortperm(v,alg=a,order=o)
+@deprecate sortperm(v::AbstractVector,o::Ordering,a::Algorithm) sortperm(v,alg=a,order=o)
+@deprecate sortperm(v::AbstractVector,f::Function) sortperm(v,lt=f)
+@deprecate sortperm(v::AbstractVector,a::Algorithm,f::Function) sortperm(v,alg=a,lt=f)
+@deprecate sortperm(v::AbstractVector,f::Function,a::Algorithm) sortperm(v,alg=a,lt=f)
+@deprecate sortperm(f::Function,v::AbstractVector,a::Algorithm) sortperm(v,alg=a,lt=f)
+
+@deprecate sort(v::AbstractVector,d::Integer,o::Ordering) sort(v,d,order=o)
+@deprecate sort(v::AbstractVector,d::Integer,a::Algorithm) sort(v,d,alg=a)
+@deprecate sort(v::AbstractVector,d::Integer,a::Algorithm,o::Ordering) sort(v,d,alg=a,order=o)
+@deprecate sort(v::AbstractVector,d::Integer,o::Ordering,a::Algorithm) sort(v,d,alg=a,order=o)
+
+@deprecate sort!(v::AbstractVector,d::Integer,o::Ordering) sort!(v,d,order=o)
+@deprecate sort!(v::AbstractVector,d::Integer,a::Algorithm) sort!(v,d,alg=a)
+@deprecate sort!(v::AbstractVector,d::Integer,a::Algorithm,o::Ordering) sort!(v,d,alg=a,order=o)
+@deprecate sort!(v::AbstractVector,d::Integer,o::Ordering,a::Algorithm) sort!(v,d,alg=a,order=o)
+
+@deprecate sortby(v::AbstractVector,f::Function) sort(v,by=f)
+@deprecate sortby(f::Function,v::AbstractVector) sort(v,by=f)
+@deprecate sortby(v::AbstractVector,a::Algorithm,f::Function) sort(v,alg=a,by=f)
+@deprecate sortby(v::AbstractVector,f::Function,a::Algorithm) sort(v,alg=a,by=f)
+@deprecate sortby(f::Function,v::AbstractVector,a::Algorithm) sort(v,alg=a,by=f)
+
+@deprecate sortby!(v::AbstractVector,f::Function) sort!(v,by=f)
+@deprecate sortby!(f::Function,v::AbstractVector) sort!(v,by=f)
+@deprecate sortby!(v::AbstractVector,a::Algorithm,f::Function) sort!(v,alg=a,by=f)
+@deprecate sortby!(v::AbstractVector,f::Function,a::Algorithm) sort!(v,alg=a,by=f)
+@deprecate sortby!(f::Function,v::AbstractVector,a::Algorithm) sort!(v,alg=a,by=f)
+
+@deprecate sortrows(v::AbstractMatrix,o::Ordering) sortrows(v,order=o)
+@deprecate sortrows(v::AbstractMatrix,a::Algorithm) sortrows(v,alg=a)
+@deprecate sortrows(v::AbstractMatrix,a::Algorithm,o::Ordering) sortrows(v,alg=a,order=o)
+@deprecate sortrows(v::AbstractMatrix,o::Ordering,a::Algorithm) sortrows(v,alg=a,order=o)
+
+@deprecate sortcols(v::AbstractMatrix,o::Ordering) sortcols(v,order=o)
+@deprecate sortcols(v::AbstractMatrix,a::Algorithm) sortcols(v,alg=a)
+@deprecate sortcols(v::AbstractMatrix,a::Algorithm,o::Ordering) sortcols(v,alg=a,order=o)
+@deprecate sortcols(v::AbstractMatrix,o::Ordering,a::Algorithm) sortcols(v,alg=a,order=o)
+
+function amap(f::Function, A::AbstractArray, axis::Integer)
+    warn_once("amap is deprecated, use mapslices(f, A, dims) instead")
+    dimsA = size(A)
+    ndimsA = ndims(A)
+    axis_size = dimsA[axis]
+
+    if axis_size == 0
+        return f(A)
+    end
+
+    idx = ntuple(ndimsA, j -> j == axis ? 1 : 1:dimsA[j])
+    r = f(sub(A, idx))
+    R = Array(typeof(r), axis_size)
+    R[1] = r
+
+    for i = 2:axis_size
+        idx = ntuple(ndimsA, j -> j == axis ? i : 1:dimsA[j])
+        R[i] = f(sub(A, idx))
+    end
+
+    return R
+end
+
+# discontinued functions
+
+function addprocs_scyld(np::Integer)
+    error("Base.addprocs_scyld is discontinued - add package ClusterManagers and then use ClusterManagers.addprocs_scyld instead.")
+end
+export addprocs_scyld
+
+function addprocs_sge(np::Integer)
+    error("Base.addprocs_sge is discontinued - add package ClusterManagers and then use ClusterManagers.addprocs_sge instead.")
+end
+export addprocs_sge

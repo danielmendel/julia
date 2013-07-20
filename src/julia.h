@@ -383,6 +383,7 @@ extern jl_datatype_t *jl_int64_type;
 extern jl_datatype_t *jl_uint64_type;
 extern jl_datatype_t *jl_float32_type;
 extern jl_datatype_t *jl_float64_type;
+extern jl_datatype_t *jl_floatingpoint_type;
 extern jl_datatype_t *jl_voidpointer_type;
 extern jl_datatype_t *jl_pointer_type;
 
@@ -448,6 +449,7 @@ extern jl_sym_t *anonymous_sym;  extern jl_sym_t *underscore_sym;
 extern jl_sym_t *abstracttype_sym; extern jl_sym_t *bitstype_sym;
 extern jl_sym_t *compositetype_sym; extern jl_sym_t *type_goto_sym;
 extern jl_sym_t *global_sym;  extern jl_sym_t *tuple_sym;
+extern jl_sym_t *boundscheck_sym;
 
 
 #ifdef _P64
@@ -520,6 +522,8 @@ void *allocobj(size_t sz);
 #define jl_is_int64(v)       jl_typeis(v,jl_int64_type)
 #define jl_is_uint32(v)      jl_typeis(v,jl_uint32_type)
 #define jl_is_uint64(v)      jl_typeis(v,jl_uint64_type)
+#define jl_is_float(v)       jl_subtype(v,(jl_value_t*)jl_floatingpoint_type,true)
+#define jl_is_floattype(v)   jl_subtype(v,(jl_value_t*)jl_floatingpoint_type,false)
 #define jl_is_float32(v)     jl_typeis(v,jl_float32_type)
 #define jl_is_float64(v)     jl_typeis(v,jl_float64_type)
 #define jl_is_bool(v)        jl_typeis(v,jl_bool_type)
@@ -805,7 +809,8 @@ DLLEXPORT int jl_spawn(char *name, char **argv, uv_loop_t *loop,
                        uv_process_t *proc, jl_value_t *julia_struct,
                        uv_handle_type stdin_type,uv_pipe_t *stdin_pipe,
                        uv_handle_type stdout_type,uv_pipe_t *stdout_pipe,
-                       uv_handle_type stderr_type,uv_pipe_t *stderr_pipe, int detach);
+                       uv_handle_type stderr_type,uv_pipe_t *stderr_pipe, 
+                       int detach, char **env);
 DLLEXPORT void jl_run_event_loop(uv_loop_t *loop);
 DLLEXPORT int jl_run_once(uv_loop_t *loop);
 DLLEXPORT int jl_process_events(uv_loop_t *loop);
@@ -874,7 +879,7 @@ DLLEXPORT void jl_restore_system_image(char *fname);
 // front end interface
 DLLEXPORT jl_value_t *jl_parse_input_line(const char *str);
 DLLEXPORT jl_value_t *jl_parse_string(const char *str, int pos0, int greedy);
-void jl_start_parsing_file(const char *fname);
+int jl_start_parsing_file(const char *fname);
 void jl_stop_parsing();
 jl_value_t *jl_parse_next();
 DLLEXPORT void jl_load_file_string(const char *text, char *filename);
@@ -998,6 +1003,11 @@ static inline int jl_vinfo_assigned_inner(jl_array_t *vi)
     return (jl_unbox_long(jl_cellref(vi,2))&4)!=0;
 }
 
+static inline int jl_vinfo_sa(jl_array_t *vi)
+{
+    return (jl_unbox_long(jl_cellref(vi,2))&16)!=0;
+}
+
 // for writing julia functions in C
 #define JL_CALLABLE(name) \
     jl_value_t *name(jl_value_t *F, jl_value_t **args, uint32_t nargs)
@@ -1079,6 +1089,7 @@ void jl_gc_setmark(jl_value_t *v);
 DLLEXPORT void jl_gc_enable(void);
 DLLEXPORT void jl_gc_disable(void);
 DLLEXPORT int jl_gc_is_enabled(void);
+DLLEXPORT size_t jl_gc_total_bytes(void);
 void jl_gc_ephemeral_on(void);
 void jl_gc_ephemeral_off(void);
 DLLEXPORT void jl_gc_collect(void);
@@ -1091,6 +1102,7 @@ void *jl_gc_managed_malloc(size_t sz);
 void *jl_gc_managed_realloc(void *d, size_t sz, size_t oldsz, int isaligned);
 void jl_gc_free_array(jl_array_t *a);
 void jl_gc_track_malloced_array(jl_array_t *a);
+void jl_gc_run_all_finalizers();
 void *alloc_2w(void);
 void *alloc_3w(void);
 void *alloc_4w(void);
@@ -1148,6 +1160,8 @@ typedef struct _jl_task_t {
     int8_t done;
     int8_t runnable;
     jl_value_t *result;
+    jl_value_t *donenotify;
+    jl_value_t *exception;
     jl_jmp_buf ctx;
     union {
         void *stackbase;
@@ -1191,6 +1205,13 @@ DLLEXPORT void jl_free2(void *p, void *hint);
 
 DLLEXPORT int jl_cpu_cores(void);
 DLLEXPORT long jl_getpagesize(void);
+
+typedef struct {
+    uv_loop_t *loop;
+    uv_handle_type type;
+    void *data;
+    uv_file file;
+} jl_uv_file_t;
 
 DLLEXPORT size_t jl_write(uv_stream_t *stream, const char *str, size_t n);
 DLLEXPORT int jl_printf(uv_stream_t *s, const char *format, ...);

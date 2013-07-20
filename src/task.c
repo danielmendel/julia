@@ -253,15 +253,25 @@ static void ctx_switch(jl_task_t *t, jl_jmp_buf *where)
     //JL_SIGATOMIC_END();
 }
 
+extern int jl_in_gc;
 static jl_value_t *switchto(jl_task_t *t)
 {
     if (t->done) {
         jl_task_arg_in_transit = (jl_value_t*)jl_null;
         return t->result;
     }
+    if (jl_in_gc) {
+        jl_error("task switch not allowed from inside gc finalizer");
+    }
     ctx_switch(t, &t->ctx);
     jl_value_t *val = jl_task_arg_in_transit;
     jl_task_arg_in_transit = (jl_value_t*)jl_null;
+    if (jl_current_task->exception != NULL &&
+        jl_current_task->exception != jl_nothing) {
+        jl_value_t *exc = jl_current_task->exception;
+        jl_current_task->exception = jl_nothing;
+        jl_throw(exc);
+    }
     return val;
 }
 
@@ -450,11 +460,13 @@ static int frame_info_from_ip(const char **func_name, int *line_num, const char 
                 *func_name = dlinfo.dli_sname;
                 // line number in C looks tricky. addr2line and libbfd seem promising. For now, punt and just return address offset.
                 *line_num = ip-(size_t)dlinfo.dli_saddr;
-            } else {
+            }
+            else {
                 *func_name = name_unknown;
                 *line_num = 0;
             }
-        } else {
+        }
+        else {
             *func_name = name_unknown;
             *file_name = name_unknown;
             *line_num = 0;
@@ -615,6 +627,9 @@ static void NORETURN throw_internal(jl_value_t *e)
     else {
         if (jl_current_task == jl_root_task) {
             JL_PRINTF(JL_STDERR, "fatal: error thrown and no exception handler available.\n");
+            // Special case on ErrorException, as that's what's thrown by jl_errorf() on bootstrap errors
+            if( jl_typeof(e) == (jl_value_t*)jl_errorexception_type )
+                JL_PRINTF(JL_STDERR, "%s\n", jl_string_data(jl_fieldref(e,0)));
             exit(1);
         }
         jl_task_t *cont = jl_current_task->on_exit;
@@ -665,6 +680,8 @@ jl_task_t *jl_new_task(jl_function_t *start, size_t ssize)
     t->runnable = 1;
     t->start = start;
     t->result = NULL;
+    t->donenotify = jl_nothing;
+    t->exception = jl_nothing;
     // there is no active exception handler available on this stack yet
     t->eh = NULL;
 #ifdef JL_GC_MARKSWEEP
@@ -756,18 +773,21 @@ void jl_init_tasks(void *stack, size_t ssize)
     jl_task_type = jl_new_datatype(jl_symbol("Task"),
                                    jl_any_type,
                                    jl_null,
-                                   jl_tuple(7,
+                                   jl_tuple(9,
                                             jl_symbol("parent"),
                                             jl_symbol("last"),
                                             jl_symbol("storage"),
                                             jl_symbol("consumers"),
                                             jl_symbol("done"),
                                             jl_symbol("runnable"),
-                                            jl_symbol("result")),
-                                   jl_tuple(7,
+                                            jl_symbol("result"),
+                                            jl_symbol("donenotify"),
+                                            jl_symbol("exception")),
+                                   jl_tuple(9,
                                             jl_any_type, jl_any_type,
                                             jl_any_type, jl_any_type,
                                             jl_bool_type, jl_bool_type,
+                                            jl_any_type, jl_any_type,
                                             jl_any_type),
                                    0, 1);
     jl_tupleset(jl_task_type->types, 0, (jl_value_t*)jl_task_type);
@@ -792,6 +812,8 @@ void jl_init_tasks(void *stack, size_t ssize)
     jl_current_task->runnable = 1;
     jl_current_task->start = NULL;
     jl_current_task->result = NULL;
+    jl_current_task->donenotify = NULL;
+    jl_current_task->exception = NULL;
     jl_current_task->eh = NULL;
 #ifdef JL_GC_MARKSWEEP
     jl_current_task->gcstack = NULL;

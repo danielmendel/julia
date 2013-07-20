@@ -7,6 +7,18 @@ Getting Around
 
    Quit (or control-D at the prompt). The default exit code is zero, indicating that the processes completed successfully.
 
+.. function:: quit()
+
+   Calls ``exit(0)``.
+
+.. function:: atexit(f)
+
+   Register a zero-argument function to be called at exit.
+
+.. function:: isinteractive()
+
+   Determine whether Julia is running an interactive session.
+
 .. function:: whos([Module,] [pattern::Regex])
 
    Print information about global variables in a module, optionally restricted
@@ -135,6 +147,14 @@ All Objects
 
    Convert all arguments to their common promotion type (if any), and return them all (as a tuple).
 
+.. function:: oftype(x, y)
+
+   Convert ``y`` to the type of ``x``.
+
+.. function:: identity(x)
+
+   The identity function. Returns its argument.
+
 Types
 -----
 
@@ -194,6 +214,12 @@ Types
 
    Determine a type big enough to hold values of each argument type without loss, whenever possible. In some cases, where no type exists which to which both types can be promoted losslessly, some loss is tolerated; for example, ``promote_type(Int64,Float64)`` returns ``Float64`` even though strictly, not all ``Int64`` values can be represented exactly as ``Float64`` values.
 
+.. function:: promote_rule(type1, type2)
+
+   Specifies what type should be used by ``promote`` when given values of types
+   ``type1`` and ``type2``. This function should not be called directly, but
+   should have definitions added to it for new types as appropriate.
+
 .. function:: getfield(value, name::Symbol)
 
    Extract a named field from a value of composite type. The syntax ``a.b`` calls
@@ -204,6 +230,10 @@ Types
    Assign ``x`` to a named field in ``value`` of composite type.
    The syntax ``a.b = c`` calls ``setfield(a, :b, c)``, and the syntax ``a.(b) = c``
    calls ``setfield(a, b, c)``.
+
+.. function:: fieldoffsets(type)
+
+   The offset of each field of ``type`` relative to data start.
 
 .. function:: fieldtype(value, name::Symbol)
 
@@ -216,6 +246,12 @@ Types
 .. function:: isbits(T)
 
    True if ``T`` is a "plain data" type, meaning it is immutable and contains no references to other values. Typical examples are numeric types such as ``Uint8``, ``Float64``, and ``Complex{Float64}``.
+
+.. function:: isleaftype(T)
+
+   Determine whether ``T`` is a concrete type that can have instances, meaning
+   its only subtypes are itself and ``None`` (but ``T`` itself is not
+   ``None``).
 
 .. function:: typejoin(T, S)
 
@@ -242,11 +278,11 @@ Generic Functions
 
    Invoke a method for the given generic function matching the specified types (as a tuple), on the specified arguments. The arguments must be compatible with the specified types. This allows invoking a method other than the most specific matching method, which is useful when the behavior of a more general definition is explicitly needed (often as part of the implementation of a more specific method of the same function).
 
-.. function:: |(x, f)
+.. function:: |>(x, f)
 
    Applies a function to the preceding argument which allows for easy function chaining.
 
-   **Example**: ``[1:5] | x->x.^2 | sum | inv``
+   **Example**: ``[1:5] |> x->x.^2 |> sum |> inv``
 
 Iteration
 ---------
@@ -416,6 +452,10 @@ Iterable Collections
 
    Get the last element of an ordered collection.
 
+.. function:: step(r)
+
+   Get the step size of a ``Range`` object.
+
 .. function:: collect(collection)
 
    Return an array of all items in a collection. For associative collections, returns (key, value) tuples.
@@ -455,7 +495,7 @@ As with arrays, ``Dicts`` may be created with comprehensions. For example,
 
    Construct a hashtable with keys of type K and values of type V
 
-.. function:: has(collection, key)
+.. function:: haskey(collection, key)
 
    Determine whether a collection has a mapping for a given key.
 
@@ -473,11 +513,11 @@ As with arrays, ``Dicts`` may be created with comprehensions. For example,
 
 .. function:: keys(collection)
 
-   Return an array of all keys in a collection.
+   Return an iterator over all keys in a collection. ``collect(keys(d))`` returns an array of keys.
 
 .. function:: values(collection)
 
-   Return an array of all values in a collection.
+   Return an iterator over all values in a collection. ``collect(values(d))`` returns an array of values.
 
 .. function:: merge(collection, others...)
 
@@ -707,6 +747,10 @@ Strings
 
    Return an array of strings by splitting the given string on occurrences of the given character delimiters, which may be specified in any of the formats allowed by ``search``'s second argument (i.e. a single character, collection of characters, string, or regular expression). If ``chars`` is omitted, it defaults to the set of all space characters, and ``include_empty`` is taken to be false. The last two arguments are also optional: they are are a maximum size for the result and a flag determining whether empty fields should be included in the result.
 
+.. function:: rsplit(string, [chars, [limit,] [include_empty]])
+
+   Similar to ``split``, but starting from the end of the string.
+
 .. function:: strip(string, [chars])
 
    Return ``string`` with any leading and trailing whitespace removed. If a string ``chars`` is provided, instead remove characters contained in that string.
@@ -837,6 +881,10 @@ Strings
 
    Tests whether a character is a valid hexadecimal digit.
 
+.. function:: symbol(str)
+
+   Convert a string to a ``Symbol``.
+
 I/O
 ---
 
@@ -883,6 +931,14 @@ I/O
 .. function:: IOBuffer([size]) -> IOBuffer
 
    Create an in-memory I/O stream, optionally specifying how much initial space is needed.
+
+.. function:: takebuf_array(b::IOBuffer)
+
+   Obtain the contents of an ``IOBuffer`` as an array, without copying.
+
+.. function:: takebuf_string(b::IOBuffer)
+
+   Obtain the contents of an ``IOBuffer`` as a string, without copying.
 
 .. function:: fdio([name::String, ]fd::Integer[, own::Bool]) -> IOStream
 
@@ -955,6 +1011,43 @@ I/O
    Converts the endianness of a value from that used by the Host to
    Little-endian.
 
+.. function:: serialize(stream, value)
+
+   Write an arbitrary value to a stream in an opaque format, such that it can
+   be read back by ``deserialize``. The read-back value will be as identical as
+   possible to the original. In general, this process will not work if the
+   reading and writing are done by different versions of Julia, or
+   an instance of Julia with a different system image.
+
+.. function:: deserialize(stream)
+
+   Read a value written by ``serialize``.
+
+Network I/O
+-----------
+
+.. function:: connect([host],port) -> TcpSocket
+
+   Connect to the host ``host`` on port ``port``
+
+.. function:: connect(path) -> NamedPipe
+
+   Connect to the Named Pipe/Domain Socket at ``path``
+
+.. function:: listen([addr,]port) -> TcpServer
+
+   Listen on port on the address specified by ``addr``. By default this listens on localhost only.
+   To listen on all interfaces pass, ``IPv4(0)`` or ``IPv6(0)`` as appropriate.
+
+.. function:: listen(path) -> PipeServer
+
+   Listens on/Creates a Named Pipe/Domain Socket 
+
+.. function:: getaddrinfo(host)
+
+   Gets the IP address of the ``host`` (may have to do a DNS lookup)
+
+
 Text I/O
 --------
 
@@ -1006,7 +1099,7 @@ Text I/O
 
    Create an iterable object that will yield each line from a stream.
 
-.. function:: readdlm(source, delim::Char; has_header=false, use_mmap=true, ignore_invalid_chars=false)
+.. function:: readdlm(source, delim::Char; has_header=false, use_mmap=false, ignore_invalid_chars=false)
 
    Read a matrix from the source where each line gives one row, with elements separated by the given delimeter. The source can be a text file, stream or byte array. Memory mapped filed can be used by passing the byte array representation of the mapped segment as source. 
 
@@ -1037,6 +1130,8 @@ Text I/O
 
 Memory-mapped I/O
 -----------------
+
+Note: Currently not available on Windows.
 
 .. function:: mmap_array(type, dims, stream, [offset])
 
@@ -1567,6 +1662,10 @@ Mathematical Functions
 .. function:: sqrt(x)
 
    Return :math:`\sqrt{x}`
+
+.. function:: isqrt(x)
+
+   Integer square root.
 
 .. function:: cbrt(x)
 
@@ -2101,6 +2200,10 @@ Integers
 
    **Example**: ``isprime(3) -> true``
 
+.. function:: primes(n)
+
+   Returns a collection of the prime numbers <= ``n``.
+
 .. function:: isodd(x::Integer) -> Bool
 
    Returns ``true`` if ``x`` is odd (that is, not divisible by 2), and ``false`` otherwise.
@@ -2236,6 +2339,14 @@ Constructors
 .. function:: ones(type, dims)
 
    Create an array of all ones of specified type
+
+.. function:: infs(type, dims)
+
+   Create an array where every element is infinite and of the specified type
+
+.. function:: nans(type, dims)
+
+   Create an array where every element is NaN of the specified type
 
 .. function:: trues(dims)
 
@@ -2949,24 +3060,54 @@ some built-in integration support in Julia.
 Parallel Computing
 ------------------
 
-.. function:: addprocs(n)
+.. function:: addprocs(n) -> List of process identifiers
 
    Add processes on the local machine. Can be used to take advantage of multiple cores.
 
-.. function:: addprocs({"host1","host2",...}; tunnel=false, dir=JULIA_HOME, sshflags::Cmd=``)
+.. function:: addprocs({"host1","host2",...}; tunnel=false, dir=JULIA_HOME, sshflags::Cmd=``, cman::ClusterManager) -> List of process identifiers
 
-   Add processes on remote machines via SSH. Requires julia to be installed in the same location on each node, or to be available via a shared file system.
-   If ``tunnel`` is ``true`` then SSH tunneling will be used. Named argument ``dir``
-   optionally specifies the location of the julia binaries on the worker nodes. Additional ssh options may be specified
-   by passing a Cmd object with named argument ``sshflags``, e.g. :literal:`sshflags=\`-i /home/foo/bar.pem\``
+   Add processes on remote machines via SSH or a custom cluster manager. 
+   Requires julia to be installed in the same location on each node, or to be available via a shared file system.
+   
+   Keyword arguments:
 
-.. function:: addprocs_sge(n)
+   ``tunnel`` : if ``true`` then SSH tunneling will be used to connect to the worker. 
 
-   Add processes via the Sun/Oracle Grid Engine batch queue, using ``qsub``.
+   ``dir`` :  specifies the location of the julia binaries on the worker nodes. 
+
+   ``sshflags`` : specifies additional ssh options, e.g. :literal:`sshflags=\`-i /home/foo/bar.pem\`` .
+
+   ``cman`` : Workers are started using the specified cluster manager. 
+
+   For example Beowulf clusters are  supported via a custom cluster manager implemented 
+   in  package ``ClusterManagers``.
+   
+   See the documentation for package ``ClusterManagers`` for more information on how to 
+   write a custom cluster manager.
+   
+.. function:: addprocs_sge(n) - DEPRECATED from Base, use ClusterManagers.addprocs_sge(n)
+
+   Adds processes via the Sun/Oracle Grid Engine batch queue, using ``qsub``.
 
 .. function:: nprocs()
 
    Get the number of available processors.
+
+.. function:: nworkers()
+
+   Get the number of available worker processors. This is one less than nprocs(). Equal to nprocs() if nprocs() == 1.
+
+.. function:: procs()
+
+   Returns a list of all process identifiers.
+
+.. function:: workers()
+
+   Returns a list of all worker process identifiers.
+
+.. function:: rmprocs(pids...)
+
+   Removes the specified workers. 
 
 .. function:: myid()
 
@@ -2980,9 +3121,18 @@ Parallel Computing
 
    Call a function asynchronously on the given arguments on the specified processor. Returns a ``RemoteRef``.
 
-.. function:: wait(RemoteRef)
+.. function:: wait(x)
 
-   Wait for a value to become available for the specified remote reference.
+   Block the current task until some event occurs, depending on the type
+   of the argument:
+
+   * ``RemoteRef``: Wait for a value to become available for the specified remote reference.
+
+   * ``Condition``: Wait for ``notify`` on a condition.
+
+   * ``Process``: Wait for the process to exit, and get its exit code.
+
+   * ``Task``: Wait for a ``Task`` to finish, returning its result value.
 
 .. function:: fetch(RemoteRef)
 
@@ -3011,6 +3161,34 @@ Parallel Computing
 .. function:: RemoteRef(n)
 
    Make an uninitialized remote reference on processor ``n``.
+
+.. function:: @spawn
+
+   Execute an expression on an automatically-chosen processor, returning a
+   ``RemoteRef`` to the result.
+
+.. function:: @spawnat
+
+   Accepts two arguments, ``p`` and an expression, and runs the expression
+   asynchronously on processor ``p``, returning a ``RemoteRef`` to the result.
+
+.. function:: @fetch
+
+   Equivalent to ``fetch(@spawn expr)``.
+
+.. function:: @fetchfrom
+
+   Equivalent to ``fetch(@spawnat p expr)``.
+
+.. function:: @async
+
+   Schedule an expression to run on the local machine, also adding it to the
+   set of items that the nearest enclosing ``@sync`` waits for.
+
+.. function:: @sync
+
+   Wait until all dynamically-enclosed uses of ``@async``, ``@spawn``, and
+   ``@spawnat`` complete.
 
 Distributed Arrays
 ------------------
@@ -3074,6 +3252,24 @@ System
 
    Run a command object, constructed with backticks, and tell whether it was successful (exited with a code of 0).
 
+.. function:: process_running(p::Process)
+
+   Determine whether a process is currently running.
+
+.. function:: process_exited(p::Process)
+
+   Determine whether a process has exited.
+
+.. function:: process_exit_status(p::Process)
+
+   Get the exit status of an exited process. The result is undefined if the
+   process is still running. Use ``wait(p)`` to wait for a process to exit,
+   and get its exit status.
+
+.. function:: kill(p::Process, signum=SIGTERM)
+
+   Send a signal to a process. The default is to terminate the process.
+
 .. function:: readsfrom(command)
 
    Starts running a command asynchronously, and returns a tuple (stream,process). The first value is a stream reading from the process' standard output.
@@ -3086,15 +3282,23 @@ System
 
    Starts running a command asynchronously, and returns a tuple (stdout,stdin,process) of the output stream and input stream of the process, and the process object itself.
 
-.. data:: >
+.. function:: ignorestatus(command)
 
-   Redirect standard output of a process.
+   Mark a command object so that running it will not throw an error if the
+   result code is non-zero.
 
-   **Example**: ``run(`ls` > "out.log")``
+.. function:: detach(command)
 
-.. data:: <
+   Mark a command object so that it will be run in a new process group,
+   allowing it to outlive the julia process, and not have Ctl-C interrupts
+   passed to it.
 
-   Redirect standard input of a process.
+.. data:: |>
+
+   Redirect standard input or output of a process.
+
+   **Example**: ``run(`ls` |> "out.log")``
+   **Example**: ``run("file.txt" |> `cat`)``
 
 .. data:: >>
 
@@ -3173,6 +3377,18 @@ System
 .. function:: toq()
 
    Return, but do not print, the time elapsed since the last :func:`tic`.
+
+.. function:: @time
+
+   A macro to execute and expression, printing time it took to execute and the total number of bytes its execution caused to be allocated, before returning the value of the expression.
+
+.. function:: @elapsed
+
+   A macro to evaluate an expression, discarding the resulting value, instead returning the number of seconds it took to execute as a floating-point number.
+
+.. function:: @allocated
+
+   A macro to evaluate an expression, discarding the resulting value, instead returning the total number of bytes allocated during evaluation of the expression.
 
 .. function:: EnvHash() -> EnvHash
 
@@ -3276,6 +3492,21 @@ Errors
 
    Throw an object as an exception
 
+.. function:: rethrow([e])
+
+   Throw an object without changing the current exception backtrace.
+   The default argument is the current exception (if called within a
+   ``catch`` block).
+
+.. function:: backtrace()
+
+   Get a backtrace object for the current program point.
+
+.. function:: catch_backtrace()
+
+   Get the backtrace of the current exception, for use within ``catch``
+   blocks.
+
 .. function:: errno()
 
    Get the value of the C library's ``errno``
@@ -3317,7 +3548,7 @@ Tasks
 
 .. function:: yield()
 
-   For scheduled tasks, switch back to the scheduler to allow another scheduled task to run.
+   For scheduled tasks, switch back to the scheduler to allow another scheduled task to run. A task that calls this function is still runnable, and will be restarted immediately if there are no other runnable tasks.
 
 .. function:: task_local_storage(symbol)
 
@@ -3326,6 +3557,43 @@ Tasks
 .. function:: task_local_storage(symbol, value)
 
    Assign a value to a symbol in the current task's task-local storage.
+
+.. function:: Condition()
+
+   Create an edge-triggered event source that tasks can wait for. Tasks
+   that call ``wait`` on a ``Condition`` are suspended and queued.
+   Tasks are woken up when ``notify`` is later called on the ``Condition``.
+   Edge triggering means that only tasks waiting at the time ``notify`` is
+   called can be woken up. For level-triggered notifications, you must
+   keep extra state to keep track of whether a notification has happened.
+   The ``RemoteRef`` type does this, and so can be used for level-triggered
+   events.
+
+.. function:: notify(condition, val=nothing; all=true, error=false)
+
+   Wake up tasks waiting for a condition, passing them ``val``.
+   If ``all`` is true (the default), all waiting tasks are woken, otherwise
+   only one is. If ``error`` is true, the passed value is raised as an
+   exception in the woken tasks.
+
+.. function:: schedule(t::Task)
+
+   Add a task to the scheduler's queue. This causes the task to run constantly
+   when the system is otherwise idle, unless the task performs a blocking
+   operation such as ``wait``.
+
+.. function:: @schedule
+
+   Wrap an expression in a Task and add it to the scheduler's queue.
+
+.. function:: @task
+
+   Wrap an expression in a Task executing it, and return the Task. This
+   only creates a task, and does not run it.
+
+.. function:: sleep(seconds)
+
+   Block the current task for a specified number of seconds.
 
 Reflection
 ----------
@@ -3372,3 +3640,19 @@ Reflection
 .. function:: functionloc(f::Function, types)
 
    Returns a tuple ``(filename,line)`` giving the location of a method definition.
+
+Internals
+---------
+
+.. function:: gc()
+
+   Perform garbage collection. This should not generally be used.
+
+.. function:: gc_disable()
+
+   Disable garbage collection. This should be used only with extreme
+   caution, as it can cause memory use to grow without bound.
+
+.. function:: gc_enable()
+
+   Re-enable garbage collection after calling ``gc_disable``.

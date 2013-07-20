@@ -14,8 +14,7 @@
 
 @test readall(`echo hello | sort`) == "hello | sort\n"
 @test readall(`echo hello` |> `sort`) == "hello\n"
-num = length(spawn(`echo hello` |> `sort`).processes) 
-@test num == 2
+@test length(spawn(`echo hello` |> `sort`).processes) == 2
 
 out = readall(`echo hello` & `echo world`)
 @test search(out,"world") != (0,0)
@@ -23,6 +22,20 @@ out = readall(`echo hello` & `echo world`)
 @test readall((`echo hello` & `echo world`) |> `sort`)=="hello\nworld\n"
 
 @test (run(`printf "       \033[34m[stdio passthrough ok]\033[0m\n"`); true)
+
+# Test for SIGPIPE being treated as normal termination (throws an error if broken)
+@test (run(`yes`|>`head`|>SpawnNullStream()); true)
+
+a = Base.Condition()
+
+@schedule begin
+    p = spawn(`yes`|>SpawnNullStream())
+    Base.notify(a,p)
+    @test !Base.wait_success(p)
+end
+kill(wait(a))
+
+@test_throws run(`foo`)
 
 if false
     prefixer(prefix, sleep) = `perl -nle '$|=1; print "'$prefix' ", $_; sleep '$sleep';'`
@@ -63,6 +76,8 @@ end
     close(sock)
 end
 
+readall(setenv(`sh -c 'echo \$TEST'`,["TEST=Hello World"])) == "Hello World\n"
+readall(setenv(`sh -c 'echo \$TEST'`,["TEST"=>"Hello World"])) == "Hello World\n"
 
 # Here we test that if we close a stream with pending writes, we don't lose the writes.
 str = ""
@@ -80,3 +95,18 @@ file = tempname()
 stdin, proc = writesto(`cat -` |> file)
 write(stdin, str)
 close(stdin)
+
+# issue #3373
+# fixing up Conditions after interruptions
+r = RemoteRef()
+t = @async begin
+    try
+        wait(r)
+    end
+    @test wait(spawn(`sleep 1`)) == 0
+end
+yield()
+Base.interrupt_waiting_task(t, InterruptException())
+yield()
+put(r,11)
+yield()

@@ -142,6 +142,12 @@ int jl_egal(jl_value_t *a, jl_value_t *b)
         return 1;
     }
     jl_datatype_t *dt = (jl_datatype_t*)ta;
+    if (dt == jl_datatype_type) {
+        jl_datatype_t *dta = (jl_datatype_t*)a;
+        jl_datatype_t *dtb = (jl_datatype_t*)b;
+        return dta->name == dtb->name &&
+            jl_egal((jl_value_t*)dta->parameters, (jl_value_t*)dtb->parameters);
+    }
     if (dt->mutabl) return 0;
     size_t sz = dt->size;
     if (sz == 0) return 1;
@@ -612,13 +618,13 @@ DLLEXPORT void jl_print_int64(JL_STREAM *s, int64_t i)
     JL_PRINTF(s, "%lld", i);
 }
 
-DLLEXPORT int jl_substrtod(char *str, int offset, int len, double *out)
+DLLEXPORT int jl_substrtod(char *str, size_t offset, int len, double *out)
 {
     char *p;
     errno = 0;
     char *bstr = str+offset;
     *out = strtod(bstr, &p);
-    if((p == bstr) || (p != (bstr+len)) ||
+    if ((p == bstr) || (p != (bstr+len)) ||
         (errno==ERANGE && (*out==0 || *out==HUGE_VAL || *out==-HUGE_VAL)))
         return 1;
     return 0;
@@ -651,7 +657,7 @@ DLLEXPORT int jl_substrtof(char *str, int offset, int len, float *out)
     *out = strtof(bstr, &p);
 #endif
 
-    if((p == bstr) || (p != (bstr+len)) ||
+    if ((p == bstr) || (p != (bstr+len)) ||
         (errno==ERANGE && (*out==0 || *out==HUGE_VALF || *out==-HUGE_VALF)))
         return 1;
     return 0;
@@ -856,7 +862,11 @@ JL_CALLABLE(jl_f_new_type_constructor)
     if (!jl_is_type(args[1]))
         jl_type_error("typealias", (jl_value_t*)jl_type_type, args[1]);
     jl_tuple_t *p = (jl_tuple_t*)args[0];
-    return (jl_value_t*)jl_new_type_ctor(p, args[1]);
+    jl_value_t *tc = (jl_value_t*)jl_new_type_ctor(p, args[1]);
+    int i;
+    for(i=0; i < jl_tuple_len(p); i++)
+        ((jl_tvar_t*)jl_tupleref(p,i))->bound = 0;
+    return tc;
 }
 
 JL_CALLABLE(jl_f_typevar)
@@ -935,7 +945,7 @@ JL_CALLABLE(jl_f_applicable)
     if (!jl_is_gf(args[0]))
         jl_error("applicable: not a generic function");
     return jl_method_lookup(jl_gf_mtable(args[0]),
-                            &args[1], nargs-1, 0) != jl_bottom_func ?
+                            &args[1], nargs-1, 1) != jl_bottom_func ?
         jl_true : jl_false;
 }
 
@@ -999,6 +1009,12 @@ DLLEXPORT uptrint_t jl_object_id(jl_value_t *v)
         return h;
     }
     jl_datatype_t *dt = (jl_datatype_t*)tv;
+    if (dt == jl_datatype_type) {
+        jl_datatype_t *dtv = (jl_datatype_t*)v;
+        uptrint_t h = inthash((uptrint_t)tv);
+        return bitmix(bitmix(h, jl_object_id((jl_value_t*)dtv->name)),
+                      jl_object_id((jl_value_t*)dtv->parameters));
+    }
     if (dt->mutabl) return inthash((uptrint_t)v);
     size_t sz = jl_datatype_size(tv);
     uptrint_t h = inthash((uptrint_t)tv);

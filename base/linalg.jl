@@ -26,11 +26,14 @@ export
     Schur,
     SVD,
     Hermitian,
+    Symmetric,
     Triangular,
     Diagonal,
 
 # Functions
-    check_openblas,
+    bkfact,
+    bkfact!,
+    check_blas,
     chol,
     cholfact,
     cholfact!,
@@ -57,6 +60,8 @@ export
     expm,
     sqrtm,
     eye,
+    factorize,
+    factorize!,
     gradient,
     hessfact,
     hessfact!,
@@ -77,6 +82,7 @@ export
     norm,
     normfro,
     null,
+    peakflops,
     pinv,
     qr,
     qrfact!,
@@ -158,6 +164,7 @@ include("linalg/factorization.jl")
 include("linalg/bunchkaufman.jl")
 include("linalg/triangular.jl")
 include("linalg/hermitian.jl")
+include("linalg/symmetric.jl")
 include("linalg/woodbury.jl")
 include("linalg/tridiag.jl")
 include("linalg/bidiag.jl")
@@ -172,5 +179,11 @@ include("linalg/cholmod.jl")
 
 include("linalg/arpack.jl")
 include("linalg/arnoldi.jl")
+
+function init()
+    if Base.blas_vendor() == :mkl
+        ccall((:MKL_Set_Interface_Layer, Base.libblas_name), Void, (Cint,), USE_BLAS64 ? 1 : 0)
+    end
+end
 
 end # module LinAlg

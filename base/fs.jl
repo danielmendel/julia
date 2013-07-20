@@ -18,7 +18,7 @@ const S_IRWXO = 0o007
 export File,
        # open,
        # close,
-       # write,
+       write,
        unlink,
        JL_O_WRONLY,
        JL_O_RDONLY,
@@ -35,20 +35,19 @@ export File,
        S_IRGRP, S_IWGRP, S_IXGRP, S_IRWXG,
        S_IROTH, S_IWOTH, S_IXOTH, S_IRWXO
 
-#import Base.show, Base.open, Base.close, Base.write
-import Base: uvtype, uvhandle, eventloop, fd, position, stat, close
+import Base: uvtype, uvhandle, eventloop, fd, position, stat, close, write, read, readall, 
+            _sizeof_uv_fs
 
 include("file_constants.jl")
 
 abstract AbstractFile <: IO
-
-const _sizeof_uv_fs_t = ccall(:jl_sizeof_uv_fs_t,Int32,())
 
 type File <: AbstractFile
     path::String
     open::Bool
     handle::Int32
     File(path::String) = new(path,false,-1)
+    File(fd::RawFD) = new("",true,fd.fd)
 end
 
 type AsyncFile <: AbstractFile
@@ -62,13 +61,14 @@ uvhandle(file::File) = file.handle
 _uv_fs_result(req) = ccall(:jl_uv_fs_result,Int32,(Ptr{Void},),req)
 
 function open(f::File,flags::Integer,mode::Integer)
-    req = Base.Intrinsics.box(Ptr{Void},Intrinsics.jl_alloca(Base.Intrinsics.unbox(Int32,_sizeof_uv_fs_t)))
+    req = c_malloc(_sizeof_uv_fs)
     ret = ccall(:uv_fs_open,Int32,(Ptr{Void},Ptr{Void},Ptr{Uint8},Int32,Int32,Ptr{Void}),
                 eventloop(),req,bytestring(f.path),flags,mode,C_NULL)
-    uv_error(:open,ret==-1)
     f.handle = _uv_fs_result(req)
-    f.open = true
     ccall(:uv_fs_req_cleanup,Void,(Ptr{Void},),req)
+    c_free(req)
+    uv_error(:open,ret==-1)
+    f.open = true
     f
 end
 open(f::String,flags,mode) = open(File(f),flags,mode)
@@ -78,23 +78,21 @@ function close(f::File)
     if !f.open
         error("File is already closed")
     end
-    req = Intrinsics.box(Ptr{Void},Intrinsics.jl_alloca(Intrinsics.unbox(Int32,_sizeof_uv_fs_t)))
-    err = ccall(:uv_fs_close,Int32,(Ptr{Void},Ptr{Void},Int32,Ptr{Void}),
-                eventloop(),req,f.handle,C_NULL)
+    err = ccall(:jl_fs_close, Int32, (Int32,), f.handle)
     uv_error("close",err != 0)
     f.handle = -1
     f.open = false
-    ccall(:uv_fs_req_cleanup,Void,(Ptr{Void},),req)
     f
 end
 
 function unlink(p::String)
-    req = box(Ptr{Void},Intrinsics.jl_alloca(unbox(Int32,_sizeof_uv_fs_t)))
-    err = ccall(:uv_fs_unlink,Int32,(Ptr{Void},Ptr{Void},Ptr{Uint8},Ptr{Void}),
-                eventloop(),req,bytestring(p),C_NULL)
+    err = ccall(:jl_fs_unlink, Int32, (Ptr{Uint8},), bytestring(p))
     uv_error("unlink",err != 0)
 end
 function unlink(f::File)
+    if isempty(f.path)
+      error("No path associated with this file")
+    end
     if f.open
         close(f)
     end
@@ -102,24 +100,74 @@ function unlink(f::File)
     f
 end
 
-function write(f::File,buf::Ptr{Uint8},len::Integer,offset::Integer)
+function write(f::File, buf::Ptr{Uint8}, len::Integer, offset::Integer=-1)
     if !f.open
         error("File is not open")
     end
-    req = box(Ptr{Void},Intrinsics.jl_alloca(unbox(Int32,_sizeof_uv_fs_t)))
-    err = ccall(:uv_fs_write,Int32,(Ptr{Void},Ptr{Void},Int32,Ptr{Uint8},Csize_t,Int64,Ptr{Void}),
-                eventloop(),req,f.handle,buf,len,offset,C_NULL)
-    uv_error(err)
-    f
+    err = ccall(:jl_fs_write, Int32, (Int32, Ptr{Uint8}, Csize_t, Csize_t),
+                f.handle, buf, len, offset)
+    uv_error("write",err == -1)
+    len
+end
+
+function write(f::File, c::Uint8)
+    if !f.open
+        error("File is not open")
+    end
+    err = ccall(:jl_fs_write_byte, Int32, (Int32, Cchar), f.handle, c)
+    uv_error("write",err == -1)
+    1
+end
+
+function write{T}(f::File, a::Array{T})
+    if isbits(T)
+        write(f,pointer(a),length(a)*sizeof(eltype(a)))
+    else
+        invoke(write, (IO, Array), f, a)
+    end
 end
 
 function truncate(f::File, n::Integer)
-    req = box(Ptr{Void},Intrinsics.jl_alloca(unbox(Int32,_sizeof_uv_fs_t)))
+    req = Base.c_malloc(_sizeof_uv_fs)
     err = ccall(:uv_fs_ftruncate,Int32,(Ptr{Void},Ptr{Void},Int32,Int64,Ptr{Void}),
                 eventloop(),req,f.handle,n,C_NULL)
+    c_free(req)
     uv_error(err)
     f    
 end
+
+function read(f::File, ::Type{Uint8})
+    if !f.open
+        error("File is not open")
+    end
+    ret = ccall(:jl_fs_read_byte, Int32, (Int32,), f.handle)
+    uv_error("read", ret == -1)
+    return uint8(ret)
+end
+
+function read{T}(f::File, a::Array{T})
+    if isbits(T)
+        nb = length(a)*sizeof(T)
+        ret = ccall(:jl_fs_read, Int32, (Int32, Ptr{Void}, Csize_t),
+                    f.handle, a, nb)
+        uv_error("write",ret == -1)
+    else
+        invoke(read, (IO, Array), s, a)
+    end
+    a
+end
+
+function readbytes(f::File)
+    a = Array(Uint8, filesize(f) - position(f))
+    read(f,a)
+    a
+end
+
+const SEEK_SET = int32(0)
+const SEEK_CUR = int32(1)
+const SEEK_END = int32(2)
+
+position(f::File) = ccall(:lseek,Coff_t,(Int32,Coff_t,Int32),f.handle,0,SEEK_CUR)
 
 fd(f::File) = RawFD(f.handle)
 stat(f::File) = stat(fd(f))

@@ -27,6 +27,9 @@ end
 # all subtypes should implement this
 write(s::IO, x::Uint8) = error(typeof(s)," does not support byte I/O")
 
+write(io::IO, x) = throw(MethodError(write, (io, x)))
+write(io::IO, xs...) = for x in xs write(io, x) end
+
 if ENDIAN_BOM == 0x01020304
     function write(s::IO, x::Integer)
         sz = sizeof(x)
@@ -46,8 +49,9 @@ else
 end
 
 write(s::IO, x::Bool)    = write(s, uint8(x))
-write(s::IO, x::Float32) = write(s, box(Int32,unbox(Float32,x)))
-write(s::IO, x::Float64) = write(s, box(Int64,unbox(Float64,x)))
+#write(s::IO, x::Float16) = write(s, reinterpret(Int16,x))
+write(s::IO, x::Float32) = write(s, reinterpret(Int32,x))
+write(s::IO, x::Float64) = write(s, reinterpret(Int64,x))
 
 function write(s::IO, a::AbstractArray)
     nb = 0
@@ -171,6 +175,12 @@ end
 
 readchomp(x) = chomp!(readall(x))
 
+function readall(s::IO)
+    b = readbytes(s)
+    return is_valid_ascii(b) ? ASCIIString(b) : UTF8String(b)
+end
+readall(filename::String) = open(readall, filename)
+
 ## high-level iterator interfaces ##
 
 type EachLine
@@ -231,6 +241,7 @@ show(io::IO, s::IOStream) = print(io, "IOStream(", s.name, ")")
 fd(s::IOStream) = int(ccall(:jl_ios_fd, Clong, (Ptr{Void},), s.ios))
 close(s::IOStream) = ccall(:ios_close, Void, (Ptr{Void},), s.ios)
 flush(s::IOStream) = ccall(:ios_flush, Void, (Ptr{Void},), s.ios)
+isreadonly(s::IOStream) = bool(ccall(:ios_get_readonly, Cint, (Ptr{Void},), s.ios))
 
 truncate(s::IOStream, n::Integer) =
     (ccall(:ios_trunc, Int32, (Ptr{Void}, Uint), s.ios, n)==0 ||
@@ -306,6 +317,9 @@ write(s::IOStream, b::Uint8) = int(ccall(:jl_putc, Int32, (Uint8, Ptr{Void}), b,
 
 function write{T}(s::IOStream, a::Array{T})
     if isbits(T)
+        if isreadonly(s)
+            error("Cannot write to a read-only IOStream")
+        end
         int(ccall(:ios_write, Uint, (Ptr{Void}, Ptr{Void}, Uint),
                   s.ios, a, length(a)*sizeof(T)))
     else
@@ -314,6 +328,9 @@ function write{T}(s::IOStream, a::Array{T})
 end
 
 function write(s::IOStream, p::Ptr, nb::Integer)
+    if isreadonly(s)
+        error("Cannot write to a read-only IOStream")
+    end
     int(ccall(:ios_write, Uint, (Ptr{Void}, Ptr{Void}, Uint), s.ios, p, nb))
 end
 
@@ -357,7 +374,12 @@ end
 
 ## text I/O ##
 
-write(s::IOStream, c::Char) = int(ccall(:ios_pututf8, Int32, (Ptr{Void}, Char), s.ios, c))
+function write(s::IOStream, c::Char)
+    if isreadonly(s)
+        error("Cannot write to a read-only IOStream")
+    end
+    int(ccall(:ios_pututf8, Int32, (Ptr{Void}, Char), s.ios, c))
+end
 read(s::IOStream, ::Type{Char}) = ccall(:jl_getutf8, Char, (Ptr{Void},), s.ios)
 
 takebuf_string(s::IOStream) =
@@ -381,13 +403,7 @@ end
 
 sprint(f::Function, args...) = sprint(0, f, args...)
 
-function repr(x)
-    s = IOBuffer()
-    show(s, x)
-    takebuf_string(s)
-end
-
-write(x) = write(OUTPUT_STREAM::IO, x)
+write(x) = write(STDOUT::IO, x)
 
 function readuntil(s::IOStream, delim::Uint8)
     ccall(:jl_readuntil, Array{Uint8,1}, (Ptr{Void}, Uint8), s.ios, delim)
@@ -409,12 +425,6 @@ function readbytes(s::IOStream)
     end
     b
 end
-
-function readall(s::IOStream)
-    b = readbytes(s)
-    return is_valid_ascii(b) ? ASCIIString(b) : UTF8String(b)
-end
-readall(filename::String) = open(readall, filename)
 
 # based on code by Glen Hertz
 function readuntil(s::IO, t::String)

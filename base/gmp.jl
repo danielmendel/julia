@@ -3,9 +3,10 @@ module GMP
 export BigInt
 
 import Base: *, +, -, /, <, <<, >>, >>>, <=, ==, >, >=, ^, (~), (&), (|), ($),
-             binomial, cmp, convert, div, factorial, fld, gcd, gcdx, lcm, mod,
+             binomial, cmp, convert, div, divrem, factorial, fld, gcd, gcdx, lcm, mod,
              ndigits, promote_rule, rem, show, isqrt, string, isprime, powermod,
-             widemul, sum
+             widemul, sum, trailing_zeros, trailing_ones, count_ones, base, parseint,
+             serialize, deserialize
 
 type BigInt <: Integer
     alloc::Cint
@@ -18,14 +19,36 @@ type BigInt <: Integer
         return b
     end
 end
-BigInt_clear(mpz::BigInt) = ccall((:__gmpz_clear, :libgmp), Void, (Ptr{BigInt},), &mpz)
+
+function BigInt_clear(mpz::BigInt)
+    ccall((:__gmpz_clear, :libgmp), Void, (Ptr{BigInt},), &mpz)
+end
+
+function gmp_init()
+    ccall((:__gmp_set_memory_functions, :libgmp), Void,
+          (Ptr{Void},Ptr{Void},Ptr{Void}),
+          cglobal(:jl_gc_counted_malloc),
+          cglobal(:jl_gc_counted_realloc),
+          cglobal(:jl_gc_counted_free))
+end
 
 BigInt(x::BigInt) = x
-function BigInt(x::String)
+
+function mpz_set_str(x::String, b::Integer)
     z = BigInt()
-    err = ccall((:__gmpz_set_str, :libgmp), Int32, (Ptr{BigInt}, Ptr{Uint8}, Int32), &z, bytestring(x), 0)
-    if err != 0; error("Invalid input"); end
+    err = ccall((:__gmpz_set_str, :libgmp), Int32, (Ptr{BigInt}, Ptr{Uint8}, Int32), &z, bytestring(x), b)
+    if err != 0; error("string is not a valid integer"); end
     return z
+end
+
+# note: 0 is a special base value that uses leading characters (0x, 0b, 0)
+BigInt(x::String) = mpz_set_str(x, 0)
+
+function parseint(::Type{BigInt}, s::String, base::Integer=10)
+    if !(2 <= base <= 62)
+        error("invalid base: $b. Base b must satisfy: 2 <= b =< 62.")
+    end
+    mpz_set_str(s, base)
 end
 
 function BigInt(x::Clong)
@@ -45,7 +68,7 @@ BigInt(x::Integer) =
 BigInt(x::Unsigned) =
     x <= typemax(Culong) ? BigInt(convert(Culong,x)) : BigInt(string(x))
 
-convert{T<:Integer}(::Type{BigInt}, x::T) = BigInt(x)
+convert(::Type{BigInt}, x::Integer) = BigInt(x)
 
 convert(::Type{Int64}, n::BigInt) = int64(convert(Clong, n))
 convert(::Type{Int32}, n::BigInt) = int32(convert(Clong, n))
@@ -92,6 +115,15 @@ end
 convert(::Type{Int128}, x::BigInt) = copysign(int128(uint128(abs(x))),x)
 
 promote_rule{T<:Integer}(::Type{BigInt}, ::Type{T}) = BigInt
+
+# serialization
+
+function serialize(s, n::BigInt)
+    Base.serialize_type(s, BigInt)
+    serialize(s, base(62,n))
+end
+
+deserialize(s, ::Type{BigInt}) = parseint(BigInt, deserialize(s), 62)
 
 # Binary ops
 for (fJ, fC) in ((:+, :add), (:-,:sub), (:*, :mul),
@@ -206,12 +238,14 @@ end
 >>(x::BigInt, c::Int32) = x >>> c
 
 trailing_zeros(x::BigInt) = int(ccall((:__gmpz_scan1, :libgmp), Culong, (Ptr{BigInt}, Culong), &x, 0))
- trailing_ones(x::BigInt) = int(ccall((:__gmpz_scan0, :libgmp), Culong, (Ptr{BigInt}, Culong), &x, 0))
+trailing_ones(x::BigInt) = int(ccall((:__gmpz_scan0, :libgmp), Culong, (Ptr{BigInt}, Culong), &x, 0))
+
+count_ones(x::BigInt) = int(ccall((:__gmpz_popcount, :libgmp), Culong, (Ptr{BigInt},), &x))
 
 function divrem(x::BigInt, y::BigInt)
     z1 = BigInt()
     z2 = BigInt()
-    ccall((:__gmpz_tdiv_qr, :libgmp), Void, (Ptr{BigInt}, Ptr{BigInt}, Ptr{BigInt}, Ptr{BigInt}), &(z1.mpz), &(z2.mpz), &x, &y)
+    ccall((:__gmpz_tdiv_qr, :libgmp), Void, (Ptr{BigInt}, Ptr{BigInt}, Ptr{BigInt}, Ptr{BigInt}), &z1, &z2, &x, &y)
     z1, z2
 end
 
@@ -311,10 +345,22 @@ function show(io::IO, x::BigInt)
     print(io, string(x))
 end
 
-ndigits(x::BigInt) = ccall((:__gmpz_sizeinbase,:libgmp), Culong, (Ptr{BigInt}, Int32), &x, 10)
+function base(b::Integer, n::BigInt)
+    if !(2 <= b <= 62)
+        error("invalid base: $b")
+    end
+    p = ccall((:__gmpz_get_str,:libgmp), Ptr{Uint8}, (Ptr{Uint8}, Cint, Ptr{BigInt}),
+              C_NULL, b, &n)
+    len = int(ccall(:strlen, Csize_t, (Ptr{Uint8},), p))
+    ASCIIString(pointer_to_array(p,len,true))
+end
+
+ndigits(x::BigInt, base::Integer=10) = ccall((:__gmpz_sizeinbase,:libgmp), Culong, (Ptr{BigInt}, Int32), &x, base)
 isprime(x::BigInt, reps=25) = ccall((:__gmpz_probab_prime_p,:libgmp), Cint, (Ptr{BigInt}, Cint), &x, reps) > 0
 
-widemul(x::BigInt, y::BigInt) = x*y
-widemul(x::Union(Int128,Uint128), y::Union(Int128,Uint128)) = BigInt(x)*BigInt(y)
+widemul(x::BigInt, y::BigInt)   = x*y
+widemul(x::Int128, y::Uint128)  = BigInt(x)*BigInt(y)
+widemul(x::Uint128, y::Int128)  = BigInt(x)*BigInt(y)
+widemul{T<:Integer}(x::T, y::T) = BigInt(x)*BigInt(y)
 
 end # module

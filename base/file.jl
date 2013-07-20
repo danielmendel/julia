@@ -65,11 +65,6 @@ end
 
 # The following use Unix command line facilites
 
-# list the contents of a directory
-ls() = run(`ls -l`)
-ls(args::Cmd) = run(`ls -l $args`)
-ls(args::String...) = run(`ls -l $args`)
-
 rm(path::String) = run(`rm $path`)
 cp(src::String, dst::String) = run(`cp $src $dst`)
 mv(src::String, dst::String) = run(`mv $src $dst`)
@@ -191,7 +186,7 @@ function readdir(path::String)
         entry = bytestring(ccall(:jl_uv_fs_t_ptr_offset, Ptr{Uint8},
                                  (Ptr{Uint8}, Int32), uv_readdir_req, offset))
         push!(entries, entry)
-        offset += length(entry) + 1   # offset to the next entry
+        offset += sizeof(entry) + 1   # offset to the next entry
     end
 
     # Clean up the request string

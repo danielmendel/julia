@@ -1,19 +1,29 @@
 module Types
 
-export VersionInterval, VersionSet, Requires, Available, Fixed, merge_requires!, satisfies
+export VersionInterval, VersionSet, Requires, Available, Fixed,
+       merge_requires!, satisfies, normal, @recover
+
+normal(v::VersionNumber) = VersionNumber(v.major, v.minor, v.patch)
 
 immutable VersionInterval
     lower::VersionNumber
     upper::VersionNumber
+    VersionInterval(lower::VersionNumber, upper::VersionNumber) = new(normal(lower), normal(upper))
 end
 VersionInterval(lower::VersionNumber) = VersionInterval(lower,typemax(VersionNumber))
 VersionInterval() = VersionInterval(typemin(VersionNumber))
 
-Base.show(io::IO, i::VersionInterval) = print(io, "[$(i.lower),$(i.upper))")
+function Base.show(io::IO, i::VersionInterval)
+    if i.upper == normal(typemax(VersionNumber))
+        print(io, "[$(i.lower),$(typemax(VersionNumber)))")
+    else
+        print(io, "[$(i.lower),$(i.upper))")
+    end
+end
 Base.isempty(i::VersionInterval) = i.upper <= i.lower
-Base.contains(i::VersionInterval, v::VersionNumber) = i.lower <= v < i.upper
+Base.contains(i::VersionInterval, v::VersionNumber) = i.lower <= normal(v) < i.upper
 Base.intersect(a::VersionInterval, b::VersionInterval) = VersionInterval(max(a.lower,b.lower), min(a.upper,b.upper))
-==(a::VersionInterval, b::VersionInterval) = (a.lower == b.lower) & (a.upper == b.upper)
+Base.isequal(a::VersionInterval, b::VersionInterval) = (a.lower == b.lower) & (a.upper == b.upper)
 
 immutable VersionSet
     intervals::Vector{VersionInterval}
@@ -38,10 +48,11 @@ Base.contains(s::VersionSet, v::VersionNumber) = any(i->contains(i,v), s.interva
 function Base.intersect(A::VersionSet, B::VersionSet)
     ivals = vec([ intersect(a,b) for a in A.intervals, b in B.intervals ])
     filter!(i->!isempty(i), ivals)
-    sortby!(ivals, i->i.lower)
+    sort!(ivals, by=i->i.lower)
     VersionSet(ivals)
 end
-==(A::VersionSet, B::VersionSet) = (A.intervals == B.intervals)
+Base.isequal(A::VersionSet, B::VersionSet) = (A.intervals == B.intervals)
+Base.hash(s::VersionSet) = hash(s.intervals)
 
 typealias Requires Dict{ByteString,VersionSet}
 
@@ -60,6 +71,8 @@ immutable Available
     requires::Requires
 end
 
+Base.isequal(a::Available, b::Available) = (a.sha1 == b.sha1 && a.requires == b.requires)
+
 Base.show(io::IO, a::Available) = isempty(a.requires) ?
     print(io, "Available(", repr(a.sha1), ")") :
     print(io, "Available(", repr(a.sha1), ",", a.requires, ")")
@@ -70,6 +83,8 @@ immutable Fixed
 end
 Fixed(v::VersionNumber) = Fixed(v,Requires())
 
+Base.isequal(a::Fixed, b::Fixed) = (a.version == b.version && a.requires == b.requires)
+
 Base.show(io::IO, f::Fixed) = isempty(f.requires) ?
     print(io, "Fixed(", repr(f.version), ")") :
     print(io, "Fixed(", repr(f.version), ",", f.requires, ")")
@@ -77,5 +92,14 @@ Base.show(io::IO, f::Fixed) = isempty(f.requires) ?
 # TODO: Available & Fixed are almost the same – merge them?
 # Free could include the same information too, it just isn't
 # required by anything that processes these things.
+
+macro recover(ex)
+    quote
+        try $(esc(ex))
+        catch err
+            show(err)
+        end
+    end
+end
 
 end # module

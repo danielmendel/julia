@@ -1,10 +1,10 @@
-
 export
 # Modules
+    Collections,
     PCRE,
     FFTW,
-    Collections,
     DSP,
+    SparseMatrix,
     LinAlg,
     LibRandom,
     Random,
@@ -16,6 +16,7 @@ export
     Sys,
     Test,
     Pkg,
+    Pkg2,
     Operators,
     Errno,
     Meta,
@@ -114,6 +115,7 @@ export
     SVD,
     GeneralizedSVD,
     Hermitian,
+    Symmetric,
     Triangular,
     Diagonal,
     InsertionSort,
@@ -145,7 +147,7 @@ export
 
 # Exceptions
     ArgumentError,
-    DisconnectException,
+    ProcessExitedException,
     EOFError,
     ErrorException,
     KeyError,
@@ -159,6 +161,7 @@ export
     ARGS,
     C_NULL,
     CPU_CORES,
+    DL_LOAD_PATH,
     OS_NAME,
     ENDIAN_BOM,
     ENV,
@@ -170,7 +173,6 @@ export
     MS_SYNC,
     NaN,
     NaN32,
-    OUTPUT_STREAM,
     RTLD_LOCAL,
     RTLD_GLOBAL,
     RTLD_LAZY,
@@ -310,6 +312,7 @@ export
     den,
     digamma,
     div,
+    divrem,
     eps,
     erf,
     erfc,
@@ -327,6 +330,7 @@ export
     fld,
     flipsign,
     float,
+    #float16,
     float32,
     float64,
     floor,
@@ -415,7 +419,6 @@ export
     sind,
     sinh,
     sqrt,
-    square,
     tan,
     tand,
     tanh,
@@ -502,6 +505,7 @@ export
     ind2sub,
     indmax,
     indmin,
+    infs,
     invperm,
     ipermute!,
     ipermutedims,
@@ -512,6 +516,7 @@ export
     logspace,
     max,
     min,
+    nans,
     ndims,
     nnz,
     nonzeros,
@@ -544,8 +549,6 @@ export
     slicedim,
     sort,
     sort!,
-    sortby,
-    sortby!,
     sortperm,
     sortrows,
     sortcols,
@@ -565,6 +568,9 @@ export
     checkbounds,
 
 # linear algebra
+    blas_set_num_threads,
+    bkfact,
+    bkfact!,
     chol,
     cholfact,
     cholfact!,
@@ -590,6 +596,8 @@ export
     expm,
     sqrtm,
     eye,
+    factorize,
+    factorize!,
     hessfact,
     hessfact!,
     ishermitian,
@@ -609,6 +617,7 @@ export
     norm,
     normfro,
     null,
+    peakflops,
     pinv,
     qr,
     qrfact!,
@@ -755,6 +764,7 @@ export
     lpad,
     lstrip,
     match,
+    matchall,
     ismatch,
     nextind,
     prevind,
@@ -764,6 +774,7 @@ export
     rstrip,
     search,
     split,
+    rsplit,
     string,
     strip,
     strwidth,
@@ -908,12 +919,16 @@ export
     isimmutable,
     isbits,
 
-# tasks
+# tasks and conditions
+    Condition,
     consume,
     current_task,
     istaskdone,
     produce,
     task_local_storage,
+    schedule,
+    notify,
+    yield,
 
 # time
     sleep,
@@ -936,6 +951,7 @@ export
 # types
     convert,
     isleaftype,
+    fieldoffsets,
     oftype,
     promote,
     promote_rule,
@@ -992,13 +1008,13 @@ export
     gc,
     gc_disable,
     gc_enable,
+    gc_bytes,
 
 # misc
     exit,
     quit,
     atexit,
     ntuple,
-    peakflops,
     tty_cols,
     tty_rows,
 
@@ -1028,10 +1044,11 @@ export
     eof,
     fd,
     fdio,
-    FDWatcher,
+    isreadonly,
     UV_READABLE,
     UV_WRITEABLE,
     flush,
+    getaddrinfo,
     gethostname,
     getipaddr,
     htol,
@@ -1044,7 +1061,6 @@ export
     mmap_grow,
     mmap_stream_settings,
     msync,
-    munmap,
     nb_available,
     open,
     open_any_tcp_port,
@@ -1080,10 +1096,8 @@ export
 
 # multiprocessing
     addprocs,
-    addprocs_sge,
     fetch,
     isready,
-    yield,
     myid,
     nprocs,
     nworkers,
@@ -1097,6 +1111,7 @@ export
     remotecall_wait,
     take,
     wait,
+    ClusterManager,
 
 # distributed arrays
     distribute,
@@ -1164,6 +1179,7 @@ export
     operm,
 
 # external processes ## TODO: whittle down these exports.
+    detach,
     getpid,
     ignorestatus,
     kill,
@@ -1186,6 +1202,7 @@ export
     writesto,
 
 # C interface
+    c_malloc,
     c_free,
     cglobal,
     dlopen,
@@ -1194,6 +1211,7 @@ export
     dlsym,
     dlsym_e,
     errno,
+    find_library,
     pointer,
     pointer_to_array,
     cfunction,
@@ -1217,11 +1235,13 @@ export
     @time,
     @timed,
     @elapsed,
+    @allocated,
     @which,
     @windows_only,
     @unix_only,
     @osx_only,
     @linux_only,
+    @schedule,
     @sync,
     @async,
     @spawn,
@@ -1240,4 +1260,7 @@ export
     @show,
     @printf,
     @sprintf,
-    @deprecate
+    @deprecate,
+    @boundscheck,
+    @inbounds,
+    @timedwait

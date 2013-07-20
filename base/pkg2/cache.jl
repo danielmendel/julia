@@ -1,29 +1,29 @@
 module Cache
 
-using Base.Git
+using Base.Git, ..Types
 
 path(pkg::String) = abspath(".cache", pkg)
-origin(pkg::String) = Git.readchomp(`config remote.origin.url`, dir=path(pkg))
 
-function prefetch(pkg::String, url::String, ver::VersionNumber, sha1::String)
-	cache = path(pkg)
-	isdir(".cache") || mkpath(".cache")
-	if !isdir(cache)
-		from = ispath(pkg,".git") ? pkg : url
-		try Git.run(`clone -q --bare $from $cache`)
-		catch
-			run(`rm -rf $cache`)
-			rethrow()
-		end
-	elseif ispath(pkg,".git")
-	    Git.run(`fetch -q $pkg`, dir=cache)
+function prefetch{S<:String}(pkg::String, url::String, sha1s::Vector{S})
+    isdir(".cache") || mkdir(".cache")
+    cache = path(pkg)
+    if !isdir(cache)
+        info("Cloning $pkg from $url")
+        try Git.run(`clone -q --mirror $url $cache`)
+        catch
+            run(`rm -rf $cache`)
+            rethrow()
+        end
+    else
+        Git.run(`config remote.origin.url $url`, dir=cache)
+    end
+    if !all(sha1->Git.iscommit(sha1, dir=cache), sha1s)
+        info("Updating cache of $pkg...")
+	    Git.success(`remote update`, dir=cache) ||
+            error("couldn't update $cache using `git remote update`")
 	end
-	Git.run(`config remote.origin.url $url`, dir=cache)
-	Git.iscommit(sha1, dir=cache) && return
-    Git.run(`fetch -q $url`, dir=cache)
-	Git.iscommit(sha1, dir=cache) ||
-		error("$pkg version $ver [$(sha1[1:8])] not found, possible metadata misconfiguration")
-	return
+    filter(sha1->!Git.iscommit(sha1, dir=cache), sha1s)
 end
+prefetch(pkg::String, url::String, sha1::String...) = prefetch(pkg, url, [sha1...])
 
 end # module

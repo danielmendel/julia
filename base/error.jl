@@ -42,7 +42,7 @@ systemerror(p, b::Bool) = b ? throw(SystemError(string(p))) : nothing
 assert(x) = assert(x,'?')
 assert(x,labl) = x ? nothing : error("assertion failed: ", labl)
 macro assert(ex)
-    :($(esc(ex)) ? nothing : error("assertion failed: ", $(string(ex))))
+    :($(esc(ex)) ? nothing : error("assertion failed: ", string($(Expr(:quote,ex)))))
 end
 
 ## printing with color ##
@@ -59,7 +59,7 @@ end
 print_with_color(color::Symbol, io::IO, msg::String...) =
     with_output_color(print, color, io, msg...)
 print_with_color(color::Symbol, msg::String...) =
-    print_with_color(color, OUTPUT_STREAM, msg...)
+    print_with_color(color, STDOUT, msg...)
 
 # use colors to print messages and warnings in the REPL
 

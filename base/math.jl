@@ -7,7 +7,7 @@ export sin, cos, tan, sinh, cosh, tanh, asin, acos, atan,
        acosd, acotd, acscd, asecd, asind, atand, atan2,
        radians2degrees, degrees2radians,
        log, log2, log10, log1p, exponent, exp, exp2, exp10, expm1,
-       cbrt, sqrt, square, erf, erfc, erfcx, erfi, dawson,
+       cbrt, sqrt, erf, erfc, erfcx, erfi, dawson,
        ceil, floor, trunc, round, significand, 
        lgamma, hypot, gamma, lfact, max, min, ldexp, frexp,
        clamp, modf, ^, 
@@ -89,8 +89,6 @@ function hypot(x::Real, y::Real)
     end
     x * sqrt(one(r)+r*r)
 end
-
-square(x::Number) = x*x
 
 # type specific math functions
 
@@ -1130,15 +1128,15 @@ function erfcinv(y::Float32)
     else # Table 50 in Blair et al.
         t = 1.0f0 / sqrt(-log(y))
         return @horner(t, 0.15504_70003_116f0,
-                       0.13827_19649_631f1,
-                       0.69096_93488_87f0,
-                       -0.11280_81391_617f1,
-                       0.68054_42468_25f0,
-                       -0.16444_15679_1f0) /
+                          0.13827_19649_631f1,
+                          0.69096_93488_87f0,
+                         -0.11280_81391_617f1,
+                          0.68054_42468_25f0,
+                         -0.16444_15679_1f0) /
         (t *
          @horner(t, 0.15502_48498_22f0,
-                 0.13852_28141_995f1,
-                 0.1f1))
+                    0.13852_28141_995f1,
+                    0.1f1))
     end
 end
 

@@ -56,9 +56,6 @@ PATCHELF=patchelf
 endif
 endif
 
-WGET = $(abspath .)/jldownload
-WGET_DASH_O = $(WGET)
-
 ## USE_SYSTEM_LIBS options
 
 ifeq ($(USE_SYSTEM_OPENLIBM), 0)
@@ -107,6 +104,11 @@ ifeq ($(USE_SYSTEM_GMP), 0)
 MPFR_OPTS = --with-gmp=$(abspath $(BUILD))
 endif
 endif
+ifeq ($(BUILD_OS),WINNT)
+ifeq ($(OS),WINNT)
+MPFR_OPTS += --disable-thread-safe CFLAGS="-DNPRINTF_L -DNPRINTF_T -DNPRINTF_J"
+endif
+endif
 
 ifeq ($(USE_SYSTEM_ARPACK), 0)
 STAGE2_DEPS += arpack
@@ -130,7 +132,7 @@ endif
 
 ifeq ($(OS), WINNT)
 LIBTOOL_CCLD = CCLD="$(CC) -no-undefined -avoid-version"
-AUTOTOOLS_PATH_CORRECT = -cp -f $(BUILD)/bin/$(@F) $(BUILD)/lib/$(@F)
+AUTOTOOLS_PATH_CORRECT = mv $(BUILD)/bin/$(@F) $(BUILD)/lib/$(@F)
 endif
 
 ## Common build target prefixes
@@ -146,7 +148,7 @@ install: $(addprefix install-, $(LIBS))
 cleanall: $(addprefix clean-, $(LIBS))
 distclean: $(addprefix distclean-, $(LIBS))
 	rm -rf $(BUILD)
-getall: get-llvm get-readline get-uv get-pcre get-double-conversion get-openlibm get-random get-openblas get-fftw get-suitesparse get-unwind get-gmp get-mpfr get-zlib get-patchelf
+getall: get-llvm get-readline get-uv get-pcre get-double-conversion get-openlibm get-random get-openblas get-lapack get-fftw get-suitesparse get-arpack get-unwind get-gmp get-mpfr get-zlib get-patchelf
 
 ## PATHS ##
 DIRS = $(addprefix $(BUILD)/,lib include bin share etc)
@@ -203,6 +205,7 @@ LLVM_FLAGS += --disable-assertions --enable-optimized
 endif
 ifeq ($(OS), WINNT)
 LLVM_FLAGS += --with-extra-ld-options="-Wl,--stack,8388608" LDFLAGS="" --disable-shared
+LLVM_MFLAGS += CPPFLAGS="-D__USING_SJLJ_EXCEPTIONS__"
 endif
 
 ifeq ($(BUILD_LLDB),1)
@@ -220,14 +223,14 @@ endif
 
 ifneq ($(LLVM_CLANG_TAR),)
 $(LLVM_CLANG_TAR):
-	$(WGET_DASH_O) $@ http://llvm.org/releases/$(LLVM_VER)/$@
+	$(JLDOWNLOAD) $@ http://llvm.org/releases/$(LLVM_VER)/$@
 endif
 ifneq ($(LLVM_COMPILER_RT_TAR),)
 $(LLVM_COMPILER_RT_TAR):
-	$(WGET_DASH_O) $@ http://llvm.org/releases/$(LLVM_VER)/$@
+	$(JLDOWNLOAD) $@ http://llvm.org/releases/$(LLVM_VER)/$@
 endif
 $(LLVM_TAR):
-	$(WGET_DASH_O) $@ http://llvm.org/releases/$(LLVM_VER)/$@
+	$(JLDOWNLOAD) $@ http://llvm.org/releases/$(LLVM_VER)/$@
 
 ifeq ($(BUILD_LLDB),1)
 llvm-$(LLVM_VER)/tools/lldb:
@@ -314,7 +317,7 @@ READLINE_URL = https://github.com/JuliaLang/readline/tarball/master
 READLINE_OPTS = --disable-shared --enable-static --with-curses
 READLINE_CFLAGS = LOCAL_DEFS="-include $(abspath .)/readline-win.h"
 readline-$(READLINE_VER).tar.gz:
-	$(WGET_DASH_O) $@ $(READLINE_URL)
+	$(JLDOWNLOAD) $@ $(READLINE_URL)
 	touch -c $@
 readline-$(READLINE_VER)/configure: readline-$(READLINE_VER).tar.gz
 	mkdir readline-$(READLINE_VER)
@@ -334,11 +337,11 @@ READLINE_URL = ftp://ftp.gnu.org/gnu/readline/readline-$(READLINE_VER).tar.gz
 READLINE_OPTS = --enable-shared --enable-static --with-curses
 READLINE_CFLAGS = 
 readline-$(READLINE_VER).tar.gz:
-	$(WGET_DASH_O) readline62-001 http://ftp.gnu.org/gnu/readline/readline-6.2-patches/readline62-001
-	$(WGET_DASH_O) readline62-002 http://ftp.gnu.org/gnu/readline/readline-6.2-patches/readline62-002
-	$(WGET_DASH_O) readline62-003 http://ftp.gnu.org/gnu/readline/readline-6.2-patches/readline62-003
-	$(WGET_DASH_O) readline62-004 http://ftp.gnu.org/gnu/readline/readline-6.2-patches/readline62-004
-	$(WGET_DASH_O) $@ http://ftp.gnu.org/gnu/readline/$@
+	$(JLDOWNLOAD) readline62-001 http://ftp.gnu.org/gnu/readline/readline-6.2-patches/readline62-001
+	$(JLDOWNLOAD) readline62-002 http://ftp.gnu.org/gnu/readline/readline-6.2-patches/readline62-002
+	$(JLDOWNLOAD) readline62-003 http://ftp.gnu.org/gnu/readline/readline-6.2-patches/readline62-003
+	$(JLDOWNLOAD) readline62-004 http://ftp.gnu.org/gnu/readline/readline-6.2-patches/readline62-004
+	$(JLDOWNLOAD) $@ http://ftp.gnu.org/gnu/readline/$@
 	touch -c $@
 readline-$(READLINE_VER)/configure: readline-$(READLINE_VER).tar.gz
 	tar zxf $<
@@ -398,7 +401,7 @@ libuv/Makefile:
 ifeq (exists, $(shell [ -d libuv/.git ] && echo exists ))
 $(UV_OBJ_SOURCE): libuv/.git/HEAD
 endif
-ifeq (exists, $(shell [ -d $(JULIAHOME)/modules ] && echo exists ))
+ifeq (exists, $(shell [ -d $(JULIAHOME)/.git/modules/deps/libuv ] && echo exists ))
 $(UV_OBJ_SOURCE): $(JULIAHOME)/.git/modules/deps/libuv/HEAD
 endif
 LIBUV_MAKE_FLAGS = -C libuv CC="$(CC)" AR="$(AR)"
@@ -410,6 +413,7 @@ $(error libuv may autodetect your cross-compile PLATFORM incorrectly)
 endif
 endif
 $(UV_OBJ_SOURCE): libuv/Makefile
+	$(MAKE) clean $(LIBUV_MAKE_FLAGS) RUNNER_LIBS=
 	$(MAKE) libuv.a $(LIBUV_MAKE_FLAGS)
 	touch -c $@
 libuv/checked: $(LIBUV_OBJ_SOURCE)
@@ -441,7 +445,7 @@ PCRE_SRC_TARGET = pcre-$(PCRE_VER)/.libs/libpcre.$(SHLIB_EXT)
 PCRE_OBJ_TARGET = $(BUILD)/lib/libpcre.$(SHLIB_EXT)
 
 pcre-$(PCRE_VER).tar.bz2:
-	$(WGET) ftp://ftp.csx.cam.ac.uk/pub/software/programming/pcre/$@
+	$(JLDOWNLOAD) ftp://ftp.csx.cam.ac.uk/pub/software/programming/pcre/$@
 pcre-$(PCRE_VER)/configure: pcre-$(PCRE_VER).tar.bz2
 	tar jxf $<
 	touch -c $@
@@ -484,7 +488,7 @@ install-pcre: $(PCRE_OBJ_TARGET)
 GRISU_OPTS = $(CXXFLAGS) -O3 -fvisibility=hidden $(fPIC)
 
 double-conversion-$(GRISU_VER).tar.gz:
-	$(WGET_DASH_O) $@ http://double-conversion.googlecode.com/files/$@
+	$(JLDOWNLOAD) $@ http://double-conversion.googlecode.com/files/$@
 	touch -c $@
 double-conversion-$(GRISU_VER)/Makefile: double-conversion-$(GRISU_VER).tar.gz
 	mkdir -p double-conversion-$(GRISU_VER) && \
@@ -541,7 +545,7 @@ ifeq (exists, $(shell [ -d openlibm/.git ] && echo exists ))
 $(OPENLIBM_OBJ_SOURCE): openlibm/.git/HEAD
 $(OPENLIBMEXT_OBJ_SOURCE): openlibm/.git/HEAD
 endif
-ifeq (exists, $(shell [ -d $(JULIAHOME)/modules ] && echo exists ))
+ifeq (exists, $(shell [ -d $(JULIAHOME)/.git/modules/deps/openlibm ] && echo exists ))
 $(OPENLIBM_OBJ_SOURCE): $(JULIAHOME)/.git/modules/deps/openlibm/HEAD
 $(OPENLIBMEXT_OBJ_SOURCE): $(JULIAHOME)/.git/modules/deps/openlibm/HEAD
 endif
@@ -552,6 +556,7 @@ $(OPENLIBMEXT_OBJ_SOURCE): openlibm/Makefile.extras
 	$(MAKE) -C openlibm -f Makefile.extras $(OPENLIBM_FLAGS)
 	touch -c $@
 $(OPENLIBM_OBJ_TARGET): $(OPENLIBM_OBJ_SOURCE) | $(BUILD)/lib
+	cp openlibm/libopenlibm.a $(BUILD)/lib/libopenlibm.a
 	cp $< $@
 	$(INSTALL_NAME_CMD)libopenlibm.$(SHLIB_EXT) $@
 $(OPENLIBMEXT_OBJ_TARGET): $(OPENLIBMEXT_OBJ_SOURCE) | $(BUILD)/lib
@@ -559,7 +564,7 @@ $(OPENLIBMEXT_OBJ_TARGET): $(OPENLIBMEXT_OBJ_SOURCE) | $(BUILD)/lib
 	$(INSTALL_NAME_CMD)libopenlibm-extras.$(SHLIB_EXT) $@
 
 clean-openlibm:
-	-$(MAKE) -C openlibm distclean
+	-$(MAKE) -C openlibm distclean $(OPENLIBM_FLAGS)
 	-rm $(OPENLIBM_OBJ_TARGET)
 distclean-openlibm: clean-openlibm
 
@@ -593,7 +598,7 @@ LIBRANDOM_CFLAGS += -msse2 -DHAVE_SSE2
 endif
 
 random/dsfmt-$(DSFMT_VER).tar.gz:
-	$(WGET_DASH_O) $@ http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/SFMT/dSFMT-src-$(DSFMT_VER).tar.gz 
+	$(JLDOWNLOAD) $@ http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/SFMT/dSFMT-src-$(DSFMT_VER).tar.gz 
 	touch -c $@
 random/dsfmt-$(DSFMT_VER)/config.status: random/dsfmt-$(DSFMT_VER).tar.gz
 	cd random && \
@@ -634,7 +639,7 @@ Rmath/Make.inc:
 ifeq (exists, $(shell [ -d Rmath/.git ] && echo exists ))
 $(RMATH_OBJ_SOURCE): Rmath/.git/HEAD
 endif
-ifeq (exists, $(shell [ -d $(JULIAHOME)/modules ] && echo exists ))
+ifeq (exists, $(shell [ -d $(JULIAHOME)/.git/modules/deps/Rmath ] && echo exists ))
 $(RMATH_OBJ_SOURCE): $(JULIAHOME)/.git/modules/deps/Rmath/HEAD
 endif
 $(RMATH_OBJ_SOURCE): Rmath/Make.inc $(LIBRANDOM_OBJ_TARGET)
@@ -657,33 +662,45 @@ install-Rmath: $(RMATH_OBJ_TARGET)
 
 
 ## OpenBLAS ##
+# LAPACK is built into OpenBLAS by default
 
 OPENBLAS_OBJ_SOURCE = openblas-$(OPENBLAS_VER)/libopenblas.$(SHLIB_EXT)
 OPENBLAS_OBJ_TARGET = $(BUILD)/lib/libopenblas.$(SHLIB_EXT)
 
-OPENBLAS_BUILD_OPTS = CC="$(CC)" FC="$(FC)" RANLIB="$(RANLIB)" FFLAGS="$(FFLAGS) $(JFFLAGS)" USE_THREAD=$(OPENBLAS_USE_THREAD) TARGET=$(OPENBLAS_TARGET_ARCH)
-ifeq ($(OPENBLAS_DYNAMIC_ARCH), 1)
-OPENBLAS_BUILD_OPTS += DYNAMIC_ARCH=1
+OPENBLAS_BUILD_OPTS = CC="$(CC)" FC="$(FC)" RANLIB="$(RANLIB)" FFLAGS="$(FFLAGS) $(JFFLAGS)" TARGET=$(OPENBLAS_TARGET_ARCH)
+
+# Thread support
+ifeq ($(OPENBLAS_USE_THREAD), 1)
+OPENBLAS_BUILD_OPTS += USE_THREAD=1
+endif
+
+# Maximum number of threads for parallelism
 ifneq ($(ARCH),x86_64)
-# assume we can't address much memory to spawn many threads
+# Assume we can't address much memory to spawn many threads
 OPENBLAS_BUILD_OPTS += NUM_THREADS=30
 else
-# assume we may want lots of threads on some future machine
+# Assume we may want lots of threads on some future machine
 ifeq ($(OS),WINNT) #windows seems unable to handle very many
 OPENBLAS_BUILD_OPTS += NUM_THREADS=30
-else #linux can handle up to 256 according to the FAQ
-OPENBLAS_BUILD_OPTS += NUM_THREADS=256
-endif
+else # Linux can handle up to 256 according to the FAQ. Use 128 for now as that should suffice everywhere.
+OPENBLAS_BUILD_OPTS += NUM_THREADS=128
 endif
 endif
 
 # don't touch scheduler affinity since we manage this ourselves
 OPENBLAS_BUILD_OPTS += NO_AFFINITY=1
 
+# Build for all architectures - required for distribution
+ifeq ($(OPENBLAS_DYNAMIC_ARCH), 1)
+OPENBLAS_BUILD_OPTS += DYNAMIC_ARCH=1
+endif
+
+# 64-bit BLAS interface
 ifeq ($(USE_BLAS64), 1)
 OPENBLAS_BUILD_OPTS += INTERFACE64=1
 endif
 
+# Decide whether to build for 32-bit or 64-bit arch
 ifneq ($(BUILD_OS),$(OS))
 OPENBLAS_BUILD_OPTS += OSNAME=$(OS) CROSS=1 HOSTCC=$(HOSTCC)
 endif
@@ -701,18 +718,27 @@ else
 $(error "unknown arch for openblas cross-compile")
 endif
 
-openblas-$(OPENBLAS_VER).tar.gz:
-	$(WGET_DASH_O) $@ https://github.com/xianyi/OpenBLAS/tarball/$(OPENBLAS_VER) 
+# Debug OpenBLAS
+ifeq ($(OPENBLAS_DEBUG), 1)
+OPENBLAS_BUILD_OPTS += DEBUG=1
+endif
+
+openblas-$(OPENBLAS_VER).tar.gz: lapack-$(LAPACK_VER).tgz
+	$(JLDOWNLOAD) $@ https://github.com/xianyi/OpenBLAS/tarball/$(OPENBLAS_VER) 
 openblas-$(OPENBLAS_VER)/config.status: openblas-$(OPENBLAS_VER).tar.gz
 	mkdir -p openblas-$(OPENBLAS_VER) && \
 	tar -C openblas-$(OPENBLAS_VER) --strip-components 1 -xf $<
 	perl -i -ple 's/^\s*(EXTRALIB\s*\+=\s*-lSystemStubs)\s*$$/# $$1/g' $@.system
+	cp lapack-$(LAPACK_VER).tgz openblas-$(OPENBLAS_VER)
 	echo 1 > $@
 $(OPENBLAS_OBJ_SOURCE): openblas-$(OPENBLAS_VER)/config.status
 	$(MAKE) -C openblas-$(OPENBLAS_VER) $(OPENBLAS_BUILD_OPTS) || echo "*** Clean the OpenBLAS build with 'make -C deps clean-openblas'. Rebuild with 'make OPENBLAS_USE_THREAD=0 if OpenBLAS had trouble linking libpthread.so, and with 'make OPENBLAS_TARGET_ARCH=NEHALEM' if there were errors building SandyBridge support. Both these options can also be used simultaneously. ***"
 	touch -c $@
 $(OPENBLAS_OBJ_TARGET): $(OPENBLAS_OBJ_SOURCE) | $(BUILD)/lib
 	cp -f openblas-$(OPENBLAS_VER)/libopenblas.$(SHLIB_EXT) $(BUILD)/lib
+ifeq ($(OS), Linux)
+	ln -sf $(BUILD)/lib/libopenblas.$(SHLIB_EXT) $(BUILD)/lib/libopenblas.$(SHLIB_EXT).0
+endif
 	$(INSTALL_NAME_CMD)libopenblas.$(SHLIB_EXT) $(BUILD)/lib/libopenblas.$(SHLIB_EXT)
 
 clean-openblas:
@@ -778,6 +804,33 @@ compile-atlas: $(ATLAS_OBJ_SOURCE)
 check-atlas: compile-atlas
 install-atlas: $(BUILD)/lib/libsatlas.$(SHLIB_EXT)
 
+## Mac gfortran BLAS wrapper ##
+GFORTBLAS_FFLAGS =
+ifeq ($(OS),Darwin)
+ifeq ($(USE_SYSTEM_BLAS),1)
+ifeq ($(USE_SYSTEM_LAPACK),0)
+GFORTBLAS_FFLAGS += -cpp -ffree-line-length-0 -ffixed-line-length-0 \
+			    -Dsasum=sasum_gfort -Dscasum=scasum_gfort \
+				-Dscnrm2=scnrm2_gfort -Dsdot=sdot_gfort \
+				-Dsdsdot=sdsdot_gfort -Dsnrm2=snrm2_gfort \
+				-Dcdotc=cdotc_gfort -Dcdotu=cdotu_gfort \
+				-Dzdotc=zdotc_gfort -Dzdotu=zdotu_gfort \
+				\
+			    -DSASUM=SASUM_GFORT -DSCASUM=SCASUM_GFORT \
+				-DSCNRM2=SCNRM2_GFORT -DSDOT=SDOT_GFORT \
+				-DSDSDOT=SDSDOT_GFORT -DSNRM2=SNRM2_GFORT \
+				-DCDOTC=CDOTC_GFORT -DCDOTU=CDOTU_GFORT \
+				-DZDOTC=ZDOTC_GFORT -DZDOTU=ZDOTU_GFORT
+endif
+endif
+
+libgfortblas.dylib: gfortblas.c gfortblas.alias
+	$(CC) -Wall -O3 $(CPPFLAGS) $(CFLAGS) $(fPIC) -shared $< -o $@ -pipe \
+				-Wl,-reexport_framework,vecLib -Wl,-alias_list,gfortblas.alias
+$(BUILD)/lib/libgfortblas.dylib: libgfortblas.dylib
+	cp -f $< $@
+	$(INSTALL_NAME_CMD)libgfortblas.dylib $@
+endif
 
 ## LAPACK ##
 
@@ -789,27 +842,36 @@ LAPACK_OBJ_TARGET =
 LAPACK_OBJ_SOURCE =
 endif
 
+LAPACK_MFLAGS = NOOPT="$(FFLAGS) $(JFFLAGS) $(GFORTBLAS_FFLAGS) -O0" OPTS="$(FFLAGS) $(JFFLAGS) $(GFORTBLAS_FFLAGS)" FORTRAN="$(FC)" LOADER="$(FC)"
+ifneq ($(OS),WINNT)
+LAPACK_MFLAGS += BLASLIB="-Wl,-rpath,'$(BUILD)/lib' $(LIBBLAS)"
+endif
+
 lapack-$(LAPACK_VER).tgz:
-	$(WGET_DASH_O) $@ http://www.netlib.org/lapack/$@
+	$(JLDOWNLOAD) $@ http://www.netlib.org/lapack/$@
 lapack-$(LAPACK_VER)/Makefile: lapack-$(LAPACK_VER).tgz
 	tar zxf $<
 	touch -c $@
 ifeq ($(USE_SYSTEM_BLAS), 0)
-lapack-$(LAPACK_VER)/INSTALL/dlamch.o: $(OPENBLAS_OBJ_TARGET)
+lapack-$(LAPACK_VER)/liblapack.a: | $(OPENBLAS_OBJ_TARGET)
+else ifeq ($(OS),Darwin)
+lapack-$(LAPACK_VER)/liblapack.a: | $(BUILD)/lib/libgfortblas.dylib
 endif
-lapack-$(LAPACK_VER)/INSTALL/dlamch.o: lapack-$(LAPACK_VER)/Makefile
+lapack-$(LAPACK_VER)/liblapack.a: lapack-$(LAPACK_VER)/Makefile
 	cd lapack-$(LAPACK_VER) && \
 	cp INSTALL/make.inc.gfortran ./make.inc && \
-	$(MAKE) lapacklib NOOPT="-O0 $(fPIC)" OPTS="$(FFLAGS) $(JFFLAGS)" FORTRAN="$(FC)" LOADER="$(FC)"
+	$(MAKE) lapacklib $(LAPACK_MFLAGS)
 	touch -c $@
-ifeq ($(USE_SYSTEM_BLAS), 0)
-$(LAPACK_OBJ_SOURCE): $(OPENBLAS_OBJ_TARGET)
-endif
-$(LAPACK_OBJ_SOURCE): lapack-$(LAPACK_VER)/INSTALL/dlamch.o
+lapack-$(LAPACK_VER)/checked: lapack-$(LAPACK_VER)/liblapack.a
+	cd lapack-$(LAPACK_VER) && \
+	$(MAKE) lapack_testing $(LAPACK_MFLAGS) -k
+	touch $@
+$(LAPACK_OBJ_SOURCE): lapack-$(LAPACK_VER)/liblapack.a
 	cd lapack-$(LAPACK_VER) && \
 	$(FC) -shared $(FFLAGS) $(JFFLAGS) SRC/*.o INSTALL/dlamch.o INSTALL/dsecnd_INT_ETIME.o INSTALL/ilaver.o INSTALL/slamch.o $(LIBBLAS) -o liblapack.$(SHLIB_EXT)
 $(LAPACK_OBJ_TARGET): $(LAPACK_OBJ_SOURCE)
 	cp $< $@
+	$(INSTALL_NAME_CMD)liblapack.dylib $@
 
 clean-lapack:
 	-$(MAKE) -C lapack-$(LAPACK_VER) clean
@@ -820,14 +882,15 @@ distclean-lapack:
 get-lapack: lapack-$(LAPACK_VER).tgz
 configure-lapack: get-lapack
 compile-lapack: $(LAPACK_OBJ_SOURCE)
-check-lapack: compile-lapack
+check-lapack: lapack-$(LAPACK_VER)/checked
 install-lapack: $(LAPACK_OBJ_TARGET)
 
 
 ## ARPACK ##
+ARPACK_FFLAGS = $(GFORTBLAS_FFLAGS)
 
 ifeq ($(USE_BLAS64), 1)
-ARPACK_FFLAGS = -fdefault-integer-8
+ARPACK_FFLAGS += -fdefault-integer-8
 endif
 
 ARPACK_OBJ_TARGET = $(BUILD)/lib/libarpack.$(SHLIB_EXT)
@@ -836,17 +899,23 @@ ARPACK_OBJ_SOURCE = arpack-ng-$(ARPACK_VER)/libarpack.$(SHLIB_EXT)
 else
 ARPACK_OBJ_SOURCE = arpack-ng-$(ARPACK_VER)/.libs/libarpack.$(SHLIB_EXT)
 endif
-ARPACK_ARGS = F77="$(FC)" MPIF77="$(FC)"
+ARPACK_MFLAGS = F77="$(FC)" MPIF77="$(FC)"
 ARPACK_OPTS = $(FFLAGS) $(JFFLAGS)
+ARPACK_FLAGS = --with-blas="$(LIBBLAS)" --with-lapack="$(LIBLAPACK)" --disable-mpi --enable-shared FFLAGS="$(ARPACK_FFLAGS)"
+ifneq ($(OS),WINNT)
+ARPACK_FLAGS += LDFLAGS="-Wl,-rpath,'$(BUILD)/lib'"
+endif
 
 arpack-ng-$(ARPACK_VER).tar.gz:
-	$(WGET_DASH_O) $@ http://forge.scilab.org/index.php/p/arpack-ng/downloads/get/arpack-ng-$(ARPACK_VER).tar.gz
+	$(JLDOWNLOAD) $@ http://forge.scilab.org/index.php/p/arpack-ng/downloads/get/arpack-ng-$(ARPACK_VER).tar.gz
 	touch -c $@
 arpack-ng-$(ARPACK_VER)/configure: arpack-ng-$(ARPACK_VER).tar.gz
 	tar zxf $< 
 	touch -c $@
 ifeq ($(USE_SYSTEM_BLAS), 0)
-arpack-ng-$(ARPACK_VER)/config.status: $(OPENBLAS_OBJ_TARGET)
+arpack-ng-$(ARPACK_VER)/config.status: | $(OPENBLAS_OBJ_TARGET)
+else ifeq ($(USE_SYSTEM_LAPACK), 0)
+arpack-ng-$(ARPACK_VER)/config.status: | $(LAPACK_OBJ_SOURCE)
 endif
 arpack-ng-$(ARPACK_VER)/config.status: arpack-ng-$(ARPACK_VER)/configure
 ifeq ($(OS),WINNT)
@@ -855,7 +924,7 @@ ifeq ($(OS),WINNT)
 	echo 1 > $@
 else
 	cd arpack-ng-$(ARPACK_VER) && \
-	./configure $(CONFIGURE_COMMON) --with-blas="$(LIBBLAS)" --with-lapack="$(LIBLAPACK)" --disable-mpi --enable-shared FFLAGS="$(ARPACK_FFLAGS)"
+	./configure $(CONFIGURE_COMMON) $(ARPACK_FLAGS)
 endif
 	touch -c $@
 $(ARPACK_OBJ_SOURCE): arpack-ng-$(ARPACK_VER)/config.status
@@ -864,13 +933,14 @@ ifeq ($(OS),WINNT)
 	$(FC) -shared $(ARPACK_OPTS) SRC/*.f UTIL/*.f $(LIBLAPACK) $(LIBBLAS) -o libarpack.$(SHLIB_EXT)
 else
 	cd arpack-ng-$(ARPACK_VER) && \
-	$(MAKE) $(ARPACK_ARGS)
+	$(MAKE) $(ARPACK_MFLAGS)
 endif
 	touch -c $@
 arpack-ng-$(ARPACK_VER)/checked: $(ARPACK_OBJ_SOURCE)
 ifneq ($(OS),WINNT)
 	cd arpack-ng-$(ARPACK_VER) && \
-	$(MAKE) check $(ARPACK_ARGS)
+	$(MAKE) check $(ARPACK_MFLAGS) && \
+	cd TESTS && ./dnsimp
 endif
 	echo 1 > $@
 $(ARPACK_OBJ_TARGET): $(ARPACK_OBJ_SOURCE) arpack-ng-$(ARPACK_VER)/checked | $(BUILD)/lib
@@ -879,7 +949,7 @@ ifeq ($(OS),WINNT)
 	cp libarpack.$(SHLIB_EXT) $(BUILD)/lib/libarpack.$(SHLIB_EXT)
 else
 	cd arpack-ng-$(ARPACK_VER) && \
-	$(MAKE) install $(ARPACK_ARGS)
+	$(MAKE) install $(ARPACK_MFLAGS)
 	$(INSTALL_NAME_CMD)libarpack.$(SHLIB_EXT) $(BUILD)/lib/libarpack.$(SHLIB_EXT)
 ifeq ($(OS), Linux)
 	for filename in $(BUILD)/lib/libarpack.so* ; do \
@@ -922,7 +992,7 @@ ifeq ($(OS),WINNT)
 endif
 
 fftw-$(FFTW_VER).tar.gz:
-	$(WGET_DASH_O) $@ http://www.fftw.org/$@
+	$(JLDOWNLOAD) $@ http://www.fftw.org/$@
 
 fftw-$(FFTW_VER)-single/configure: fftw-$(FFTW_VER).tar.gz
 	mkdir -p fftw-$(FFTW_VER)-single && \
@@ -1032,7 +1102,7 @@ install-fftw-double: $(FFTW_DOUBLE_OBJ_TARGET)
 ## SUITESPARSE ##
 
 SUITESPARSE_OBJ_SOURCE = SuiteSparse-$(SUITESPARSE_VER)/UMFPACK/Lib/libumfpack.a
-SUITESPARSE_OBJ_TARGET = $(BUILD)/lib/libumfpack.$(SHLIB_EXT)
+SUITESPARSE_OBJ_TARGET = $(BUILD)/lib/libspqr.$(SHLIB_EXT)
 
 ifeq ($(USE_BLAS64), 1)
 UMFPACK_CONFIG = -DLONGBLAS='long long' 
@@ -1048,23 +1118,29 @@ endif
 ifneq ($(OS), WINNT)
 SUITE_SPARSE_LIB += -Wl,-rpath,'$(BUILD)/lib'
 endif
+SUITESPARSE_MFLAGS = CC="$(CC)" CXX="$(CXX)" F77="$(FC)" AR="$(AR)" RANLIB="$(RANLIB)" BLAS="$(LIBBLAS)" LAPACK="$(LIBLAPACK)" \
+	  INSTALL_LIB="$(BUILD)/lib" INSTALL_INCLUDE="$(BUILD)/include" LIB="$(SUITE_SPARSE_LIB)" \
+	  UMFPACK_CONFIG="$(UMFPACK_CONFIG)" CHOLMOD_CONFIG="$(CHOLMOD_CONFIG)"
 
 SuiteSparse-$(SUITESPARSE_VER).tar.gz:
-	$(WGET_DASH_O) $@ http://www.cise.ufl.edu/research/sparse/SuiteSparse/$@ 
+	$(JLDOWNLOAD) $@ http://www.cise.ufl.edu/research/sparse/SuiteSparse/$@ 
 SuiteSparse-$(SUITESPARSE_VER)/Makefile: SuiteSparse-$(SUITESPARSE_VER).tar.gz
 	mkdir -p SuiteSparse-$(SUITESPARSE_VER)
 	tar -C SuiteSparse-$(SUITESPARSE_VER) --strip-components 1 -zxf $<
 	touch -c $@
 ifeq ($(USE_SYSTEM_BLAS), 0)
-$(SUITESPARSE_OBJ_SOURCE): $(OPENBLAS_OBJ_TARGET)
+$(SUITESPARSE_OBJ_SOURCE): | $(OPENBLAS_OBJ_TARGET)
+else ifeq ($(USE_SYSTEM_LAPACK), 0)
+$(SUITESPARSE_OBJ_SOURCE): | $(LAPACK_OBJ_SOURCE)
 endif
-#todo: rpath is missing on mac for tests
 $(SUITESPARSE_OBJ_SOURCE): SuiteSparse-$(SUITESPARSE_VER)/Makefile
 	cd SuiteSparse-$(SUITESPARSE_VER) && \
-	$(MAKE) library CC="$(CC)" CXX="$(CXX)" F77="$(FC)" AR="$(AR)" RANLIB="$(RANLIB)" BLAS="$(LIBBLAS)" LAPACK="$(LIBLAPACK)" \
-	  INSTALL_LIB="$(BUILD)/lib" INSTALL_INCLUDE="$(BUILD)/include" LIB="$(SUITE_SPARSE_LIB)" \
-	  UMFPACK_CONFIG="$(UMFPACK_CONFIG)" CHOLMOD_CONFIG="$(CHOLMOD_CONFIG)"
+	$(MAKE) library $(SUITESPARSE_MFLAGS)
 	touch -c $@
+SuiteSparse-$(SUITESPARSE_VER)/checked: $(SUITESPARSE_OBJ_SOURCE)
+	cd SuiteSparse-$(SUITESPARSE_VER) && \
+	$(MAKE) default $(SUITESPARSE_MFLAGS)
+	touch $@
 $(SUITESPARSE_OBJ_TARGET): $(SUITESPARSE_OBJ_SOURCE)
 	mkdir -p SuiteSparse-$(SUITESPARSE_VER)/lib && \
 	cd SuiteSparse-$(SUITESPARSE_VER)/lib && \
@@ -1082,7 +1158,7 @@ $(SUITESPARSE_OBJ_TARGET): $(SUITESPARSE_OBJ_SOURCE)
 	$(INSTALL_NAME_CMD)libcholmod.$(SHLIB_EXT) $(BUILD)/lib/libcholmod.$(SHLIB_EXT) && \
 	$(CXX) -shared $(WHOLE_ARCHIVE) libsuitesparseconfig.a libumfpack.a  $(NO_WHOLE_ARCHIVE) -o $(BUILD)/lib/libumfpack.$(SHLIB_EXT) -L$(BUILD)/lib -lcholmod -lcolamd -lamd $(LIBBLAS) $(RPATH_ORIGIN) && \
 	$(INSTALL_NAME_CMD)libumfpack.$(SHLIB_EXT) $(BUILD)/lib/libumfpack.$(SHLIB_EXT) && \
-	$(CXX) -shared $(WHOLE_ARCHIVE) libsuitesparseconfig.a libspqr.a  $(NO_WHOLE_ARCHIVE) -o $(BUILD)/lib/libspqr.$(SHLIB_EXT) -L$(BUILD)/lib -lcholmod -lcolamd -lamd $(LIBBLAS) $(RPATH_ORIGIN) && \
+	$(CXX) -shared $(WHOLE_ARCHIVE) libsuitesparseconfig.a libspqr.a  $(NO_WHOLE_ARCHIVE) -o $(BUILD)/lib/libspqr.$(SHLIB_EXT) -L$(BUILD)/lib -lcholmod -lcolamd -lamd $(LIBLAPACK) $(RPATH_ORIGIN) && \
 	$(INSTALL_NAME_CMD)libspqr.$(SHLIB_EXT) $(BUILD)/lib/libspqr.$(SHLIB_EXT)
 
 clean-suitesparse:
@@ -1094,7 +1170,7 @@ distclean-suitesparse: clean-suitesparse
 get-suitesparse: SuiteSparse-$(SUITESPARSE_VER).tar.gz
 configure-suitesparse: get-suitesparse
 compile-suitesparse: $(SUITESPARSE_OBJ_SOURCE)
-check-suitesparse: compile-suitesparse
+check-suitesparse: SuiteSparse-$(SUITESPARSE_VER)/checked
 install-suitesparse: $(SUITESPARSE_OBJ_TARGET) install-suitesparse-wrapper
 
 # SUITESPARSE WRAPPER
@@ -1131,7 +1207,7 @@ LIBUNWIND_TARGET_SOURCE = libunwind-$(UNWIND_VER)/src/.libs/libunwind.a
 LIBUNWIND_CFLAGS = $(CFLAGS) -U_FORTIFY_SOURCE $(fPIC)
 
 libunwind-$(UNWIND_VER).tar.gz:
-	$(WGET_DASH_O) $@ http://download.savannah.gnu.org/releases/libunwind/$@ 
+	$(JLDOWNLOAD) $@ http://download.savannah.gnu.org/releases/libunwind/$@ 
 libunwind-$(UNWIND_VER)/configure: libunwind-$(UNWIND_VER).tar.gz
 	tar xfz $<
 	touch -c $@
@@ -1174,7 +1250,7 @@ GMP_SRC_TARGET = gmp-$(GMP_VER)/.libs/libgmp.$(SHLIB_EXT)
 GMP_OBJ_TARGET = $(BUILD)/lib/libgmp.$(SHLIB_EXT)
 
 gmp-$(GMP_VER).tar.bz2:
-	$(WGET_DASH_O) $@ ftp://ftp.gmplib.org/pub/gmp-$(GMP_VER)/$@
+	$(JLDOWNLOAD) $@ ftp://ftp.gmplib.org/pub/gmp-$(GMP_VER)/$@
 gmp-$(GMP_VER)/configure: gmp-$(GMP_VER).tar.bz2
 	tar jxf $<
 	touch -c $@
@@ -1219,7 +1295,7 @@ MPFR_CHECK_MFLAGS = LDFLAGS="-Wl,-rpath,'$(BUILD)/$(JL_LIBDIR)'"
 endif
 
 mpfr-$(MPFR_VER).tar.bz2:
-	$(WGET_DASH_O) $@ http://www.mpfr.org/mpfr-current/$@
+	$(JLDOWNLOAD) $@ http://www.mpfr.org/mpfr-current/$@
 mpfr-$(MPFR_VER)/configure: mpfr-$(MPFR_VER).tar.bz2
 	tar jxf $<
 	touch -c $@
@@ -1268,7 +1344,7 @@ ZLIB_CONFIGFLAGS += CC="$(CC)"
 endif
 
 zlib-$(ZLIB_VER).tar.gz:
-	$(WGET_DASH_O) $@ http://zlib.net/$@
+	$(JLDOWNLOAD) $@ http://zlib.net/$@
 zlib-$(ZLIB_VER)/configure: zlib-$(ZLIB_VER).tar.gz
 	tar zxf $<
 	touch -c $@
@@ -1320,7 +1396,7 @@ compile-patchelf: install-patchelf
 install-patchelf: $(PATCHELF_TARGET)
 
 patchelf-$(PATCHELF_VER).tar.bz2:
-	$(WGET_DASH_O) $@ http://hydra.nixos.org/build/1524660/download/2/$@
+	$(JLDOWNLOAD) $@ http://hydra.nixos.org/build/1524660/download/2/$@
 patchelf-$(PATCHELF_VER)/configure: patchelf-$(PATCHELF_VER).tar.bz2
 	tar jxf $<
 	touch -c $@
@@ -1359,7 +1435,7 @@ GIT_SOURCE = git-$(GIT_VER)/src/git
 GIT_TARGET = $(BUILD)/git
 
 git-$(GIT_VER).tar.gz:
-	$(WGET_DASH_O) $@ http://git-core.googlecode.com/files/$@
+	$(JLDOWNLOAD) $@ http://git-core.googlecode.com/files/$@
 git-$(GIT_VER)/configure: git-$(GIT_VER).tar.gz
 	tar zxf $<
 	touch -c $@
@@ -1390,8 +1466,6 @@ install-git: $(GIT_TARGET)
 
 ## phony targets ##
 
-.PHONY: \
-	default compile install cleanall distclean \
+.PHONY: default compile install cleanall distclean \
 	get-* configure-* compile-* check-* install-* \
 	clean-* distclean-*
-

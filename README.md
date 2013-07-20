@@ -88,27 +88,50 @@ You can read about [getting started](http://julialang.org/manual/getting-started
 Julia does not install anything outside the directory it was cloned into. Julia can be completely uninstalled by deleting this directory.
 
 <a name="Platform-Specific-Notes"/>
-## Platform-Specific Notes
+## Platform-Specific Build Notes
 
 ### Linux
 
-GCC version 4.6 or later is recommended to build Julia.
+#### General
 
-If the build fails trying to compile OpenBLAS, set one of the following build options in `Make.user` and build again. Use `OPENBLAS_TARGET_ARCH=BARCELONA` on AMD CPUs, and `OPENBLAS_TARGET_ARCH=NEHALEM` on Intel CPUs.
+* GCC version 4.6 or later is recommended to build Julia.
+* To use external shared libraries not in the system library search path, set `USE_SYSTEM_XXX=1` and `LDFLAGS=-Wl,-rpath /path/to/dir/contains/libXXX.so` in `Make.user`.
+  * Instead of setting `LDFLAGS`, putting the library directory into the environment variable `LD_LIBRARY_PATH` (at both compiling time and runtime) also works.
+* See also the [external dependencies](#Required-Build-Tools-External-Libraries).
 
-On some Linux distributions you may need to change how the readline library is linked. If you get a build error involving readline, set `USE_SYSTEM_READLINE=1` in `Make.user`.
+#### Ubuntu
 
-On Ubuntu or Debian systems, if you get any errors related to `ncurses`, you need to `apt-get install libncurses5-dev`.
+* The [julia-deps PPA](https://launchpad.net/~staticfloat/+archive/julia-deps/) contains updated packages for julia dependencies if you want to use system libraries instead of having them downloaded and built during the build process.  See [System Provided Libraries](#System-Provided-Libraries).
+
+#### CentOS 5
 
 On CentOS 5 systems, the default compiler (gcc 4.1) is too old to build Julia.
 
+If the gcc44 and gfortran44 packages are installed, you can specify their use by adding the following to Make.user
+
+    FC = gfortran44
+    CC = gcc44
+    CXX = g++44
+
+Otherwise, install or contact your systems adminstrator to install a more recent version of gcc.
+
+#### Linux Build Troubleshooting
+
+ Problem              | Possible Solution
+------------------------|---------------------
+ OpenBLAS build failure | Set one of the following build options in `Make.user` and build again: <ul><li> `OPENBLAS_TARGET_ARCH=BARCELONA` (AMD CPUs) </li><li> `OPENBLAS_TARGET_ARCH=NEHALEM` (Intel CPUs) </li><li> `USE_SYSTEM_BLAS=1` uses the system provided `libblas` <ul><li> Set `LIBBLAS=-lopenblas` and `LIBBLASNAME=libopenblas` to force the use of the system provided OpenBLAS when multiple BLAS versions are installed </li></ul></li></ul>
+ readline build error   | Set `USE_SYSTEM_READLINE=1` in `Make.user`
+ ncurses build error    | Install the `libncurses5` development package <ul><li> Debian/Ubuntu: `apt-get install libncurses5-dev` </li><li> RPM-based systems: `yum install libncurses5-devel` </li></ul>
+
 ### OS X
 
-It is essential to use a 64-bit gfortran to compile Julia dependencies. The gfortran-4.7 (and newer) compilers in brew and macports work for building Julia. If you do not use brew or macports, you can download and install [gfortran and gcc from hpc.sf.net](http://hpc.sf.net/). The HPC gfortran requires gcc to function properly. 
+It is essential to use a 64-bit gfortran to compile Julia dependencies. The gfortran-4.7 (and newer) compilers in brew and macports work for building Julia. If you do not use brew or macports, you can download and install [gfortran and gcc from hpc.sf.net](http://hpc.sf.net/). The HPC gfortran requires HPC gcc to be installed to function properly. 
 
-Clang is now used by default to build Julia on OS X (10.7 and above). Make sure to update to at least Xcode 4.3.3, and update to the latest command line tools from the Xcode preferences. This will ensure that clang v3.1 is installed, which is the minimum version of clang required to build Julia. On older systems, the Julia build will attempt to use gcc. The build also detects Snow Leopard and sets `USE_SYSTEM_LIBM=1`, `USE_SYSTEM_BLAS=1`, and `USE_SYSTEM_LAPACK=1`.
+Clang is now used by default to build Julia on OS X (10.7 and above). Make sure to update to at least Xcode 4.3.3, and update to the latest command line tools from the Xcode preferences. This will ensure that clang v3.1 is installed, which is the minimum version of clang required to build Julia. On OS X 10.6, the Julia build will automatically use gcc.
 
 If you have set `LD_LIBRARY_PATH` or `DYLD_LIBRARY_PATH` in your .bashrc or equivalent, Julia may be unable to find various libraries that come bundled with it. These environment variables need to be unset for Julia to work.
+
+If you see build failures in OpenBLAS or if you prefer to experiment, you can use the Apple provided BLAS in vecLib by building with `USE_SYSTEM_BLAS=1`. Julia does not use the Apple provided LAPACK, as it is too old.
 
 ### FreeBSD
 
@@ -159,7 +182,6 @@ Julia uses the following external libraries, which are automatically downloaded 
 - **[GMP]**                 — the GNU multiple precision arithmetic library, needed for bigint support.
 - **[MPFR]**                — the GNU multiple precision floating point library, needed for arbitrary precision floating point support.
 - **[double-conversion]**   — efficient number-to-text conversion.
-- **[Rmath]**               — basic RNGs and distributions.
 
 
 [GNU make]:     http://www.gnu.org/software/make/
@@ -187,12 +209,14 @@ Julia uses the following external libraries, which are automatically downloaded 
 [GMP]:          http://gmplib.org/
 [MPFR]:         http://www.mpfr.org/
 [double-conversion]: http://double-conversion.googlecode.com/
-[Rmath]:        http://cran.r-project.org/doc/manuals/R-admin.html#The-standalone-Rmath-library
 [libuv]:        https://github.com/JuliaLang/libuv
 
-### Build options for make
+<a name="System-Provided-Libraries">
+### System Provided Libraries
 
-If you already have one or more of these packages installed on your system, it is possible to pass `USE_SYSTEM_...=1` to `make` to prevent Julia from compiling duplicates of these libraries. The complete list of possible flags can be found in Make.inc. Please be aware that this procedure is not officially supported, as it introduces additional variablity into the installation and versioning of the dependencies, and is recommended only for system package maintainers. Unexpected compile errors may result, as the build system will do no further checking to ensure the proper packages are installed.
+If you already have one or more of these packages installed on your system, you can prevent Julia from compiling duplicates of these libraries by passing `USE_SYSTEM_...=1` to `make` or adding the line to `Make.user`. The complete list of possible flags can be found in `Make.inc`. 
+
+Please be aware that this procedure is not officially supported, as it introduces additional variablity into the installation and versioning of the dependencies, and is recommended only for system package maintainers. Unexpected compile errors may result, as the build system will do no further checking to ensure the proper packages are installed.
 
 ### SuiteSparse
 
@@ -205,7 +229,7 @@ To use the Intel [MKL] BLAS and LAPACK libraries, edit the following settings in
     USE_MKL = 1
     MKLLIB = /path/to/mkl/lib/arch
 
-`MKLLIB` points to the directory containing `libmkl_rt.so`. MKL version 10.3 or greater is required.
+`MKLLIB` points to the directory containing `libmkl_rt.so`. MKL version 10.3.6 or greater is required.
 To rebuild a pre-built Julia source install with MKL support, delete the OpenBLAS, ARPACK, and SuiteSparse dependencies from `deps`, and run `make cleanall testall`.
 
 <a name="Source-Code-Organization"/>
@@ -217,7 +241,6 @@ The Julia source code is organized as follows:
     contrib/       editor support for Julia source, miscellaneous scripts
     deps/          external dependencies
     examples/      example Julia programs
-    extras/        useful optional libraries
     src/           source for Julia language core
     test/          unit and functional test cases
     ui/            source for various front ends
@@ -245,7 +268,9 @@ The following distributions include julia, but the versions may be out of date d
 
 * [Arch Linux package](https://aur.archlinux.org/packages.php?ID=56877)
 * [Debian GNU/Linux](http://packages.debian.org/sid/julia)
-* [Ubuntu](http://packages.ubuntu.com/raring/julia)
+* Ubuntu
+  * [Ubuntu 13.04 (Raring Ringtail)](http://packages.ubuntu.com/raring/julia)
+  * [Nightly builds PPA](https://launchpad.net/~staticfloat/+archive/julianightlies) (depends on the [julia-deps PPA](https://launchpad.net/~staticfloat/+archive/julia-deps/))
 * [OS X Homebrew](http://mxcl.github.com/homebrew/)
 
 <a name="Editor-Terminal-Setup"/>

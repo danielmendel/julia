@@ -214,9 +214,9 @@ parsehex(s) = parseint(s,16)
 @test parseint(" 2") == 2
 @test parseint("+2\n") == 2
 @test parseint("-2") == -2
-@test_fails parseint("   2 \n 0")
-@test_fails parseint("2x")
-@test_fails parseint("-")
+@test_throws parseint("   2 \n 0")
+@test_throws parseint("2x")
+@test_throws parseint("-")
 
 # string manipulation
 @test strip("\t  hi   \n") == "hi"
@@ -447,6 +447,10 @@ end
 @test rsearch("foo,bar,baz", "az") == 10:11
 @test rsearch("foo,bar,baz", "az", 10) == 0:-1
 
+# array rsearch
+@test rsearch(Uint8[1,2,3],Uint8[2,3],3) == 2:3
+@test rsearch(Uint8[1,2,3],Uint8[2,3],1) == 0:-1
+
 # string search with a two-char regex
 @test search("foo,bar,baz", r"xx") == 0:-1
 @test search("foo,bar,baz", r"fo") == 1:2
@@ -482,6 +486,26 @@ end
 @test isequal(split("a b c"), ["a","b","c"])
 @test isequal(split("a  b \t c\n"), ["a","b","c"])
 
+@test isequal(rsplit("foo,bar,baz", 'x'), ["foo,bar,baz"])
+@test isequal(rsplit("foo,bar,baz", ','), ["foo","bar","baz"])
+@test isequal(rsplit("foo,bar,baz", ","), ["foo","bar","baz"])
+@test isequal(rsplit("foo,bar,baz", ',', 0), ["foo","bar","baz"])
+@test isequal(rsplit("foo,bar,baz", ',', 1), ["foo,bar,baz"])
+@test isequal(rsplit("foo,bar,baz", ',', 2), ["foo,bar","baz"])
+@test isequal(rsplit("foo,bar,baz", ',', 3), ["foo","bar","baz"])
+@test isequal(rsplit("foo,bar", "o,b"), ["fo","ar"])
+
+@test isequal(rsplit("", ','), [""])
+@test isequal(rsplit(",", ','), ["",""])
+@test isequal(rsplit(",,", ','), ["","",""])
+@test isequal(rsplit(",,", ',', 2), [",",""])
+@test isequal(rsplit("", ',', false), [])
+@test isequal(rsplit(",", ',', false), [])
+@test isequal(rsplit(",,", ',', false), [])
+
+#@test isequal(rsplit("a b c"), ["a","b","c"])
+#@test isequal(rsplit("a  b \t c\n"), ["a","b","c"])
+
 let str = "a.:.ba..:..cba.:.:.dcba.:."
 @test isequal(split(str, ".:."), ["a","ba.",".cba",":.dcba",""])
 @test isequal(split(str, ".:.", false), ["a","ba.",".cba",":.dcba"])
@@ -490,9 +514,19 @@ let str = "a.:.ba..:..cba.:.:.dcba.:."
 @test isequal(split(str, r"\.(:\.)+", false), ["a","ba.",".cba","dcba"])
 @test isequal(split(str, r"\.+:\.+"), ["a","ba","cba",":.dcba",""])
 @test isequal(split(str, r"\.+:\.+", false), ["a","ba","cba",":.dcba"])
+
+@test isequal(rsplit(str, ".:."), ["a","ba.",".cba.:","dcba",""])
+@test isequal(rsplit(str, ".:.", false), ["a","ba.",".cba.:","dcba"])
+@test isequal(rsplit(str, ".:.", 2), ["a.:.ba..:..cba.:.:.dcba", ""])
+@test isequal(rsplit(str, ".:.", 3), ["a.:.ba..:..cba.:", "dcba", ""])
+@test isequal(rsplit(str, ".:.", 4), ["a.:.ba.", ".cba.:", "dcba", ""])
+@test isequal(rsplit(str, ".:.", 5), ["a", "ba.", ".cba.:", "dcba", ""])
+@test isequal(rsplit(str, ".:.", 6), ["a", "ba.", ".cba.:", "dcba", ""])
 end
 
 # zero-width splits
+@test isequal(rsplit("", ""), [""])
+
 @test isequal(split("", ""), [""])
 @test isequal(split("", r""), [""])
 @test isequal(split("abc", ""), ["a","b","c"])
@@ -734,13 +768,19 @@ bin_val = hex2bytes("07bf")
 @test "0123456789abcdefabcdef" == bytes2hex(hex2bytes("0123456789abcdefABCDEF"))
 
 # odd size
-@test_fails hex2bytes("0123456789abcdefABCDEF0")
+@test_throws hex2bytes("0123456789abcdefABCDEF0")
 
 #non-hex characters
-@test_fails hex2bytes("0123456789abcdefABCDEFGH")
+@test_throws hex2bytes("0123456789abcdefABCDEFGH")
 
 # sizeof
 @test sizeof("abc") == 3
 @test sizeof("\u2222") == 3
 @test sizeof(SubString("abc\u2222def",4,6)) == 3
 @test sizeof(RopeString("abc","def")) == 6
+
+# issue #3597
+@test string(CharString(['T', 'e', 's', 't'])[1:1], "X") == "TX"
+
+# issue #3710
+@test prevind(SubString("{var}",2,4),4) == 3

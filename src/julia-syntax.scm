@@ -6,13 +6,17 @@
 (define (lam:body x) (cadddr x))
 
 ;; allow (:: T) => (:: #gensym T) in formal argument lists
+(define (fill-missing-argname a)
+  (if (and (pair? a) (eq? (car a) '|::|) (null? (cddr a)))
+      `(|::| ,(gensy) ,(cadr a))
+      a))
 (define (fix-arglist l)
   (if (any vararg? (butlast l))
       (error "invalid ... on non-final argument"))
   (map (lambda (a)
-	 (if (and (pair? a) (eq? (car a) '|::|) (null? (cddr a)))
-	     `(|::| ,(gensy) ,(cadr a))
-	     a))
+	 (if (and (pair? a) (eq? (car a) 'kw))
+	     `(kw ,(fill-missing-argname (cadr a)) ,(caddr a))
+	     (fill-missing-argname a)))
        l))
 
 (define (arg-name v)
@@ -1186,7 +1190,7 @@
 			     (const
 			      (= ,name (call (top TypeConstructor)
 					     (tuple ,@params) ,type-ex))))
-			   ,@(symbols->typevars params bounds #f))))
+			   ,@(symbols->typevars params bounds #t))))
 
    (pattern-lambda (comparison . chain) (expand-compare-chain chain))
 
@@ -1581,7 +1585,9 @@
 	(if (null? ranges)
 	    `(block (= ,oneresult ,expr)
 		    (type_goto ,initlabl)
+		    (boundscheck false)
 		    (call (top setindex!) ,result ,oneresult ,ri)
+		    (boundscheck pop)
 		    (= ,ri (call (top +) ,ri 1)))
 	    `(for ,(car ranges)
 		  ,(construct-loops (cdr ranges)))))
@@ -1609,9 +1615,10 @@
     (typed_comprehension atype expr . ranges)
     (if (any (lambda (x) (eq? x ':)) ranges)
 	(lower-nd-comprehension atype expr ranges)
-    (let ( (result (gensy))
-	   (ri (gensy))
-	   (rs (map (lambda (x) (gensy)) ranges)) )
+    (let ((result    (gensy))
+	  (oneresult (gensy))
+	  (ri (gensy))
+	  (rs (map (lambda (x) (gensy)) ranges)) )
 
       ;; compute the dimensions of the result
       (define (compute-dims ranges)
@@ -1621,7 +1628,10 @@
       ;; construct loops to cycle over all dimensions of an n-d comprehension
       (define (construct-loops ranges rs)
 	(if (null? ranges)
-	    `(block (call (top setindex!) ,result ,expr ,ri)
+	    `(block (= ,oneresult ,expr)
+		    (boundscheck false)
+                    (call (top setindex!) ,result ,oneresult ,ri)
+		    (boundscheck pop)
 		    (= ,ri (call (top +) ,ri 1)))
 	    `(for (= ,(cadr (car ranges)) ,(car rs))
 		  ,(construct-loops (cdr ranges) (cdr rs)))))
@@ -2059,11 +2069,11 @@
 			     (cdr e))))
 		 (cond ((symbol? dest)
 			(cons `(= ,dest ,(cons (car e) (map car r)))
-			      (apply append (map cdr r))))
+			      (apply append (map cdr (reverse r)))))
 		       (else
 			(let ((ex (cons (car e) (map car r))))
 			  (cons (if tail `(return ,ex) ex)
-				(apply append (map cdr r))))))))))))
+				(apply append (map cdr (reverse r)))))))))))))
   (to-blk (to-lff e #t #t)))
 #|
 future issue:
@@ -2282,6 +2292,7 @@ So far only the second case can actually occur.
 (define vinfo:name car)
 (define vinfo:type cadr)
 (define (vinfo:capt v) (< 0 (logand (caddr v) 1)))
+(define (vinfo:asgn v) (< 0 (logand (caddr v) 2)))
 (define (vinfo:const v) (< 0 (logand (caddr v) 8)))
 (define (vinfo:set-type! v t) (set-car! (cdr v) t))
 ;; record whether var is captured
@@ -2304,6 +2315,11 @@ So far only the second case can actually occur.
 					 (if a
 					     (logior (caddr v) 8)
 					     (logand (caddr v) -9))))
+;; whether var is assigned once
+(define (vinfo:set-sa! v a) (set-car! (cddr v)
+				      (if a
+					  (logior (caddr v) 16)
+					  (logand (caddr v) -17))))
 
 (define var-info-for assq)
 
@@ -2328,6 +2344,9 @@ So far only the second case can actually occur.
 	 (let ((vi (var-info-for (cadr e) env)))
 	   (if vi
 	       (begin
+		 (if (vinfo:asgn vi)
+		     (vinfo:set-sa! vi #f)
+		     (vinfo:set-sa! vi #t))
 		 (vinfo:set-asgn! vi #t)
 		 (if (assq (car vi) captvars)
 		     (vinfo:set-iasg! vi #t)))))

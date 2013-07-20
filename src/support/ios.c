@@ -263,7 +263,8 @@ static size_t _ios_read(ios_t *s, char *dest, size_t n, int all)
             if (all) {
                 //result = _os_read_all(s->fd, dest, n, &got);
                 _os_read_all(s->fd, dest, n, &got);
-            } else {
+            }
+            else {
                 //result = _os_read(s->fd, dest, n, &got);
                 _os_read(s->fd, dest, n, &got);
             }
@@ -674,6 +675,11 @@ int ios_bufmode(ios_t *s, bufmode_t mode)
         return -1;
     s->bm = mode;
     return 0;
+}
+
+int ios_get_readonly(ios_t *s)
+{
+    return s->readonly;
 }
 
 void ios_set_readonly(ios_t *s)

@@ -4,11 +4,12 @@ type Cmd <: AbstractCmd
     exec::Executable
     ignorestatus::Bool
     detach::Bool
-    Cmd(exec::Executable) = new(exec,false,false)
+    env::Union(Array{ByteString},Nothing)
+    Cmd(exec::Executable) = new(exec,false,false,nothing)
 end
 
 function eachline(cmd::AbstractCmd,stdin)
-    out = NamedPipe()
+    out = NamedPipe(C_NULL)
     processes = spawn(false, cmd, (stdin,out,STDERR))
     # implicitly close after reading lines, since we opened
     EachLine(out, ()->close(out))
@@ -51,7 +52,7 @@ function show(io::IO, cmds::OrCmds)
     else
         show(io, cmds.a)
     end
-    print(" |> ")
+    print(io, " |> ")
     if isa(cmds.b, AndCmds) || isa(cmds.b, CmdRedirect)
         print(io,"(")
         show(io, cmds.b)
@@ -117,6 +118,9 @@ ignorestatus(cmd::Cmd) = (cmd.ignorestatus=true; cmd)
 ignorestatus(cmd::Union(OrCmds,AndCmds)) = (ignorestatus(cmd.a); ignorestatus(cmd.b); cmd)
 detach(cmd::Cmd) = (cmd.detach=true; cmd)
 
+setenv{S<:ByteString}(cmd::Cmd, env::Array{S}) = (cmd.env = ByteString[x for x in env];cmd)
+setenv(cmd::Cmd, env::Associative) = (cmd.env = ByteString[string(k)*"="*string(v) for (k,v) in env];cmd)
+
 (&)(left::AbstractCmd,right::AbstractCmd) = AndCmds(left,right)
 (|>)(src::AbstractCmd,dest::AbstractCmd) = OrCmds(src,dest)
 
@@ -149,13 +153,13 @@ type Process
     closecb::Callback
     closenotify::Condition
     function Process(cmd::Cmd,handle::Ptr{Void},in::RawOrBoxedHandle,out::RawOrBoxedHandle,err::RawOrBoxedHandle)
-        if(!isa(in,AsyncStream))
+        if !isa(in,AsyncStream)
             in=null_handle
         end
-        if(!isa(out,AsyncStream))
+        if !isa(out,AsyncStream)
             out=null_handle
         end
-        if(!isa(err,AsyncStream))
+        if !isa(err,AsyncStream)
             err=null_handle
         end
         new(cmd,handle,in,out,err,-2,-2,false,Condition(),false,Condition())
@@ -186,10 +190,10 @@ function _jl_spawn(cmd::Ptr{Uint8}, argv::Ptr{Ptr{Uint8}}, loop::Ptr{Void}, pp::
     error = ccall(:jl_spawn, Int32,
         (Ptr{Uint8}, Ptr{Ptr{Uint8}}, Ptr{Void}, Ptr{Void}, Any, Int32,
          Ptr{Void},    Int32,       Ptr{Void},     Int32,       Ptr{Void},
-         Int32),
+         Int32, Ptr{Ptr{Uint8}}),
          cmd,        argv,            loop,      proc,      pp,  uvtype(in),
          uvhandle(in), uvtype(out), uvhandle(out), uvtype(err), uvhandle(err),
-         pp.cmd.detach)
+         pp.cmd.detach, pp.cmd.env === nothing ? C_NULL : pp.cmd.env)
     if error != 0
         c_free(proc)
         throw(UVError("spawn"))
@@ -219,8 +223,8 @@ function spawn(pc::ProcessChainOrNot,redirect::CmdRedirect,stdios::StdIOSet,exit
 end
 
 function spawn(pc::ProcessChainOrNot,cmds::OrCmds,stdios::StdIOSet,exitcb::Callback,closecb::Callback)
-    out_pipe = box(Ptr{Void},Intrinsics.jl_alloca(unbox(Int32,_sizeof_uv_named_pipe)))
-    in_pipe = box(Ptr{Void},Intrinsics.jl_alloca(unbox(Int32,_sizeof_uv_named_pipe)))
+    out_pipe = box(Ptr{Void},Intrinsics.jl_alloca(_sizeof_uv_named_pipe))
+    in_pipe = box(Ptr{Void},Intrinsics.jl_alloca(_sizeof_uv_named_pipe))
     #out_pipe = c_malloc(_sizeof_uv_named_pipe)
     #in_pipe = c_malloc(_sizeof_uv_named_pipe)
     link_pipe(in_pipe,false,out_pipe,false,null_handle)
@@ -247,7 +251,7 @@ macro setup_stdio()
         in,out,err = stdios
         if isa(stdios[1],NamedPipe) 
             if stdios[1].handle==C_NULL
-                in = box(Ptr{Void},Intrinsics.jl_alloca(unbox(Int32,_sizeof_uv_named_pipe)))
+                in = box(Ptr{Void},Intrinsics.jl_alloca(_sizeof_uv_named_pipe))
                 #in = c_malloc(_sizeof_uv_named_pipe)
                 link_pipe(in,false,stdios[1],true)
                 close_in = true
@@ -258,7 +262,7 @@ macro setup_stdio()
         end
         if isa(stdios[2],NamedPipe)
             if stdios[2].handle==C_NULL
-                out = box(Ptr{Void},Intrinsics.jl_alloca(unbox(Int32,_sizeof_uv_named_pipe)))
+                out = box(Ptr{Void},Intrinsics.jl_alloca(_sizeof_uv_named_pipe))
                 #out = c_malloc(_sizeof_uv_named_pipe)
                 link_pipe(stdios[2],false,out,true)
                 close_out = true
@@ -269,7 +273,7 @@ macro setup_stdio()
         end
         if isa(stdios[3],NamedPipe)
             if stdios[3].handle==C_NULL
-                err = box(Ptr{Void},Intrinsics.jl_alloca(unbox(Int32,_sizeof_uv_named_pipe)))
+                err = box(Ptr{Void},Intrinsics.jl_alloca(_sizeof_uv_named_pipe))
                 #err = c_malloc(_sizeof_uv_named_pipe)
                 link_pipe(stdios[3],false,err,true)
                 close_err = true
@@ -291,14 +295,14 @@ macro cleanup_stdio()
                 close(in)
             end
         end
-        if(close_out)
+        if close_out
             if isa(out,Ptr)
                 close_pipe_sync(out)
             else
                 close(out)
             end
         end
-        if(close_err)
+        if close_err
             if isa(err,Ptr)
                 close_pipe_sync(err)
             else
@@ -318,7 +322,7 @@ function spawn(pc::ProcessChainOrNot,cmd::Cmd,stdios::StdIOSet,exitcb::Callback,
     pp.handle = _jl_spawn(ptrs[1], convert(Ptr{Ptr{Uint8}}, ptrs), loop, pp,
                           in,out,err)
     @cleanup_stdio
-    if(isa(pc, ProcessChain))
+    if isa(pc, ProcessChain)
         push!(pc.processes,pp)
     end
     pp
@@ -333,18 +337,6 @@ function spawn(pc::ProcessChainOrNot,cmds::AndCmds,stdios::StdIOSet,exitcb::Call
     spawn(pc, cmds.b, (in,out,err), exitcb, closecb)
     @cleanup_stdio
     pc
-end
-
-function reinit_stdio()
-    STDIN.handle  = ccall(:jl_stdin_stream ,Ptr{Void},())
-    STDOUT.handle = ccall(:jl_stdout_stream,Ptr{Void},())
-    STDERR.handle = ccall(:jl_stderr_stream,Ptr{Void},())
-    STDIN.buffer = PipeBuffer()
-    STDOUT.buffer = PipeBuffer()
-    STDERR.buffer = PipeBuffer()
-    for stream in (STDIN,STDOUT,STDERR)
-        ccall(:jl_uv_associate_julia_struct,Void,(Ptr{Void},Any),stream.handle,stream)
-    end
 end
 
 # INTERNAL
@@ -376,7 +368,7 @@ spawn_nostdin(cmd::AbstractCmd,out::UVStream) = spawn(false,cmd,(null_handle,out
 #returns a pipe to read from the last command in the pipelines
 readsfrom(cmds::AbstractCmd) = readsfrom(cmds, null_handle)
 function readsfrom(cmds::AbstractCmd, stdin::AsyncStream)
-    out = NamedPipe()
+    out = NamedPipe(C_NULL)
     processes = spawn(false, cmds, (stdin,out,STDERR))
     start_reading(out)
     (out, processes)
@@ -384,13 +376,13 @@ end
 
 writesto(cmds::AbstractCmd) = writesto(cmds, null_handle)
 function writesto(cmds::AbstractCmd, stdout::UVStream)
-    in = NamedPipe()
+    in = NamedPipe(C_NULL)
     processes = spawn(false, cmds, (in,stdout,null_handle))
     (in, processes)
 end
 
 function readandwrite(cmds::AbstractCmd)
-    in = NamedPipe()
+    in = NamedPipe(C_NULL)
     (out, processes) = readsfrom(cmds, in)
     return (out, in, processes)
 end
@@ -421,12 +413,13 @@ function run(cmds::AbstractCmd,args...)
     wait_success(ps) ? nothing : pipeline_error(ps)
 end
 
+const SIGPIPE = 13
 function success(proc::Process)
     assert(process_exited(proc))
     if proc.exit_code == -1
         error("could not start process ", proc)
     end
-    proc.exit_code==0
+    proc.exit_code==0 && (proc.term_signal == 0 || proc.term_signal == SIGPIPE)
 end
 success(procs::Vector{Process}) = all(success, procs)
 success(procs::ProcessChain) = success(procs.processes)
@@ -552,7 +545,7 @@ macro cmd(str)
     :(cmd_gen($(shell_parse(str))))
 end
 
-wait_close(x) = if x.open; wait(x.closenotify); end
+wait_close(x) = if isopen(x) wait(x.closenotify); end
 
 wait_exit(x::Process)      = if !process_exited(x); wait(x.exitnotify); end
 wait_exit(x::ProcessChain) = for p in x.processes; wait_exit(p); end

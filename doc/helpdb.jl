@@ -364,6 +364,12 @@
 
 "),
 
+("Types","Base","fieldoffsets","fieldoffsets(type)
+
+   The offset of each field of \"type\" relative to data start.
+
+"),
+
 ("Types","Base","fieldtype","fieldtype(value, name::Symbol)
 
    Determine the declared type of a named field in a value of
@@ -384,6 +390,19 @@
    contains no references to other values. Typical examples are
    numeric types such as \"Uint8\", \"Float64\", and
    \"Complex{Float64}\".
+
+"),
+
+("Types","Base","typejoin","typejoin(T, S)
+
+   Compute a type that contains both \"T\" and \"S\".
+
+"),
+
+("Types","Base","typeintersect","typeintersect(T, S)
+
+   Compute a type that contains the intersection of \"T\" and \"S\".
+   Usually this will be the smallest such type or one close to it.
 
 "),
 
@@ -415,12 +434,12 @@
 
 "),
 
-("Generic Functions","Base","|","|(x, f)
+("Generic Functions","Base","|>","|>(x, f)
 
    Applies a function to the preceding argument which allows for easy
    function chaining.
 
-   **Example**: \"[1:5] | x->x.^2 | sum | inv\"
+   **Example**: \"[1:5] |> x->x.^2 |> sum |> inv\"
 
 "),
 
@@ -702,13 +721,15 @@
 
 ("Associative Collections","Base","keys","keys(collection)
 
-   Return an array of all keys in a collection.
+   Return an iterator over all keys in a collection.
+   \"collect(keys(d))\" returns an array of keys.
 
 "),
 
 ("Associative Collections","Base","values","values(collection)
 
-   Return an array of all values in a collection.
+   Return an iterator over all values in a collection.
+   \"collect(values(d))\" returns an array of values.
 
 "),
 
@@ -1066,6 +1087,12 @@
    is taken to be false. The last two arguments are also optional:
    they are are a maximum size for the result and a flag determining
    whether empty fields should be included in the result.
+
+"),
+
+("Strings","Base","rsplit","rsplit(string, [chars, [limit,] [include_empty]])
+
+   Similar to \"split\", but starting from the end of the string.
 
 "),
 
@@ -1457,6 +1484,38 @@
 
 "),
 
+("Network I/O","Base","connect","connect([host], port) -> TcpSocket
+
+   Connect to the host \"host\" on port \"port\"
+
+"),
+
+("Network I/O","Base","connect","connect(path) -> NamedPipe
+
+   Connect to the Named Pipe/Domain Socket at \"path\"
+
+"),
+
+("Network I/O","Base","listen","listen([addr], port) -> TcpServer
+
+   Listen on port on the address specified by \"addr\". By default
+   this listens on localhost only. To listen on all interfaces pass,
+   \"IPv4(0)\" or \"IPv6(0)\" as appropriate.
+
+"),
+
+("Network I/O","Base","listen","listen(path) -> PipeServer
+
+   Listens on/Creates a Named Pipe/Domain Socket
+
+"),
+
+("Network I/O","Base","getaddrinfo","getaddrinfo(host)
+
+   Gets the IP address of the \"host\" (may have to do a DNS lookup)
+
+"),
+
 ("Text I/O","Base","show","show(x)
 
    Write an informative text representation of a value to the current
@@ -1537,28 +1596,28 @@
 
 "),
 
-("Text I/O","Base","readdlm","readdlm(source, delim::Char; has_header=false, use_mmap=true, ignore_invalid_chars=false)
+("Text I/O","Base","readdlm","readdlm(source, delim::Char; has_header=false, use_mmap=false, ignore_invalid_chars=false)
 
-   Read a matrix from the source where each line gives one row, with 
-   elements separated by the given delimeter. The source can be a 
-   text file, stream or byte array. Memory mapped filed can be used 
-   by passing the byte array representation of the mapped segment as 
-   source. 
+   Read a matrix from the source where each line gives one row, with
+   elements separated by the given delimeter. The source can be a text
+   file, stream or byte array. Memory mapped filed can be used by
+   passing the byte array representation of the mapped segment as
+   source.
 
-   If \"has_header\" is \"true\" the first row of data would be read 
-   as headers and the tuple \"(data_cells, header_cells)\" is 
-   returned instead of only \"data_cells\".
+   If \"has_header\" is \"true\" the first row of data would be read
+   as headers and the tuple \"(data_cells, header_cells)\" is returned
+   instead of only \"data_cells\".
 
-   If \"use_mmap\" is \"true\" the file specified by \"source\" is 
+   If \"use_mmap\" is \"true\" the file specified by \"source\" is
    memory mapped for potential speedups.
 
-   If \"ignore_invalid_chars\" is \"true\" bytes in \"source\" with 
-   invalid character encoding will be ignored. Otherwise an error is 
+   If \"ignore_invalid_chars\" is \"true\" bytes in \"source\" with
+   invalid character encoding will be ignored. Otherwise an error is
    thrown indicating the offending character position.
 
-   If all data is numeric, \"data_cells\" will be a numeric array. If 
-   some elements cannot be parsed as numbers, a cell array of numbers 
-   and strings is returned for \"data_cells\".
+   If all data is numeric, the result will be a numeric array. If some
+   elements cannot be parsed as numbers, a cell array of numbers and
+   strings is returned.
 
 "),
 
@@ -1579,7 +1638,7 @@
 
 "),
 
-("Text I/O","Base","readcsv","readcsv(filename[, T::Type]; options...)
+("Text I/O","Base","readcsv","readcsv(source, [T::Type]; options...)
 
    Equivalent to \"readdlm\" with \"delim\" set to comma.
 
@@ -1925,6 +1984,27 @@
 ("Mathematical Functions","Base","\$","\$(x, y)
 
    Bitwise exclusive or
+
+"),
+
+("Mathematical Functions","Base","isapprox","isapprox(x::Number, y::Number; rtol::Real=cbrt(maxeps), atol::Real=sqrt(maxeps))
+
+   Inexact equality comparison - behaves slightly different depending
+   on types of input args:
+
+   * For \"FloatingPoint\" numbers, \"isapprox\" returns \"true\" if
+     \"abs(x-y) <= atol + rtol*max(abs(x), abs(y))\".
+
+   * For \"Integer\" and \"Rational\" numbers, \"isapprox\" returns
+     \"true\" if \"abs(x-y) <= atol\". The *rtol* argument is ignored.
+     If one of \"x\" and \"y\" is \"FloatingPoint\", the other is
+     promoted, and the method above is called instead.
+
+   * For \"Complex\" numbers, the distance in the complex plane is
+     compared, using the same criterion as above.
+
+   For default tolerance arguments, \"maxeps = max(eps(abs(x)),
+   eps(abs(y)))\".
 
 "),
 
@@ -3418,6 +3498,19 @@
 
 "),
 
+("Arrays","Base","infs","infs(type, dims)
+
+   Create an array where every element is infinite and of the
+   specified type
+
+"),
+
+("Arrays","Base","nans","nans(type, dims)
+
+   Create an array where every element is NaN of the specified type
+
+"),
+
 ("Arrays","Base","trues","trues(dims)
 
    Create a Bool array with all values set to true
@@ -3621,6 +3714,13 @@
 ("Arrays","Base","find","find(A)
 
    Return a vector of the linear indexes of the non-zeros in \"A\".
+
+"),
+
+("Arrays","Base","find","find(f, A)
+
+   Return a vector of the linear indexes of  \"A\" where \"f\" returns
+   true.
 
 "),
 
@@ -4371,28 +4471,43 @@
 
 "),
 
-("Parallel Computing","Base","addprocs","addprocs(n)
+("Parallel Computing","Base","addprocs","addprocs(n) -> List of process identifiers
 
    Add processes on the local machine. Can be used to take advantage
    of multiple cores.
 
 "),
 
-("Parallel Computing","Base","addprocs","addprocs({\"host1\", \"host2\", ...}; tunnel=false, dir=JULIA_HOME, sshflags::Cmd=``)
+("Parallel Computing","Base","addprocs","addprocs({\"host1\", \"host2\", ...}; tunnel=false, dir=JULIA_HOME, sshflags::Cmd=``, cman::ClusterManager) -> List of process identifiers
 
-   Add processes on remote machines via SSH. Requires julia to be
-   installed in the same location on each node, or to be available via
-   a shared file system. If \"tunnel\" is \"true\" then SSH tunneling
-   will be used. Named argument \"dir\" optionally specifies the
-   location of the julia binaries on the worker nodes. Additional ssh
-   options may be specified by passing a Cmd object with named
-   argument \"sshflags\", e.g. \"sshflags=`-i /home/foo/bar.pem`\"
+   Add processes on remote machines via SSH or a custom cluster
+   manager. Requires julia to be installed in the same location on
+   each node, or to be available via a shared file system.
+
+   Keyword arguments:
+
+   \"tunnel\" : if \"true\" then SSH tunneling will be used to connect
+   to the worker.
+
+   \"dir\" :  specifies the location of the julia binaries on the
+   worker nodes.
+
+   \"sshflags\" : specifies additional ssh options, e.g.
+   \"sshflags=`-i /home/foo/bar.pem`\" .
+
+   \"cman\" : Workers are started using the specified cluster manager.
+
+   For example Beowulf clusters are  supported via a custom cluster
+   manager implemented in  package \"ClusterManagers\".
+
+   See the documentation for package \"ClusterManagers\" for more
+   information on how to write a custom cluster manager.
 
 "),
 
-("Parallel Computing","Base","addprocs_sge","addprocs_sge(n)
+("Parallel Computing","Base","addprocs_sge","addprocs_sge(n) - DEPRECATED from Base, use ClusterManagers.addprocs_sge(n)
 
-   Add processes via the Sun/Oracle Grid Engine batch queue, using
+   Adds processes via the Sun/Oracle Grid Engine batch queue, using
    \"qsub\".
 
 "),
@@ -4400,6 +4515,31 @@
 ("Parallel Computing","Base","nprocs","nprocs()
 
    Get the number of available processors.
+
+"),
+
+("Parallel Computing","Base","nworkers","nworkers()
+
+   Get the number of available worker processors. This is one less
+   than nprocs(). Equal to nprocs() if nprocs() == 1.
+
+"),
+
+("Parallel Computing","Base","procs","procs()
+
+   Returns a list of all process identifiers.
+
+"),
+
+("Parallel Computing","Base","workers","workers()
+
+   Returns a list of all worker process identifiers.
+
+"),
+
+("Parallel Computing","Base","rmprocs","rmprocs(pids...)
+
+   Removes the specified workers.
 
 "),
 
@@ -4425,10 +4565,20 @@
 
 "),
 
-("Parallel Computing","Base","wait","wait(RemoteRef)
+("Parallel Computing","Base","wait","wait(x)
 
-   Wait for a value to become available for the specified remote
-   reference.
+   Block the current task until some event occurs, depending on the
+   type of the argument:
+
+   * \"RemoteRef\": Wait for a value to become available for the
+     specified remote reference.
+
+   * \"Condition\": Wait for \"notify\" on a condition.
+
+   * \"Process\": Wait for the process to exit, and get its exit code.
+
+   * \"Task\": Wait for a \"Task\" to finish, returning its result
+     value.
 
 "),
 
@@ -4474,6 +4624,47 @@
 ("Parallel Computing","Base","RemoteRef","RemoteRef(n)
 
    Make an uninitialized remote reference on processor \"n\".
+
+"),
+
+("Parallel Computing","Base","@spawn","@spawn()
+
+   Execute an expression on an automatically-chosen processor,
+   returning a \"RemoteRef\" to the result.
+
+"),
+
+("Parallel Computing","Base","@spawnat","@spawnat()
+
+   Accepts two arguments, \"p\" and an expression, and runs the
+   expression asynchronously on processor \"p\", returning a
+   \"RemoteRef\" to the result.
+
+"),
+
+("Parallel Computing","Base","@fetch","@fetch()
+
+   Equivalent to \"fetch(@spawn expr)\".
+
+"),
+
+("Parallel Computing","Base","@fetchfrom","@fetchfrom()
+
+   Equivalent to \"fetch(@spawnat p expr)\".
+
+"),
+
+("Parallel Computing","Base","@async","@async()
+
+   Schedule an expression to run on the local machine, also adding it
+   to the set of items that the nearest enclosing \"@sync\" waits for.
+
+"),
+
+("Parallel Computing","Base","@sync","@sync()
+
+   Wait until all dynamically-enclosed uses of \"@async\", \"@spawn\",
+   and \"@spawnat\" complete.
 
 "),
 
@@ -4575,6 +4766,33 @@
 
 "),
 
+("System","Base","process_running","process_running(p::Process)
+
+   Determine whether a process is currently running.
+
+"),
+
+("System","Base","process_exited","process_exited(p::Process)
+
+   Determine whether a process has exited.
+
+"),
+
+("System","Base","process_exit_status","process_exit_status(p::Process)
+
+   Get the exit status of an exited process. The result is undefined
+   if the process is still running. Use \"wait(p)\" to wait for a
+   process to exit, and get its exit status.
+
+"),
+
+("System","Base","kill","kill(p::Process, signum=SIGTERM)
+
+   Send a signal to a process. The default is to terminate the
+   process.
+
+"),
+
 ("System","Base","readsfrom","readsfrom(command)
 
    Starts running a command asynchronously, and returns a tuple
@@ -4599,17 +4817,27 @@
 
 "),
 
-("System","Base",">",">
+("System","Base","ignorestatus","ignorestatus(command)
 
-   Redirect standard output of a process.
-
-   **Example**: \"run(`ls` > \"out.log\")\"
+   Mark a command object so that running it will not throw an error if
+   the result code is non-zero.
 
 "),
 
-("System","Base","<","<
+("System","Base","detach","detach(command)
 
-   Redirect standard input of a process.
+   Mark a command object so that it will be run in a new process
+   group, allowing it to outlive the julia process, and not have Ctl-C
+   interrupts passed to it.
+
+"),
+
+("System","Base","|>","|>
+
+   Redirect standard input or output of a process.
+
+   **Example**: \"run(`ls` |> \"out.log\")\" **Example**:
+   \"run(\"file.txt\" |> `cat`)\"
 
 "),
 
@@ -4748,6 +4976,30 @@
 
    Return, but do not print, the time elapsed since the last
    \"tic()\".
+
+"),
+
+("System","Base","@time","@time()
+
+   A macro to execute and expression, printing time it took to execute
+   and the total number of bytes its execution caused to be allocated,
+   before returning the value of the expression.
+
+"),
+
+("System","Base","@elapsed","@elapsed()
+
+   A macro to evaluate an expression, discarding the resulting value,
+   instead returning the number of seconds it took to execute as a
+   floating-point number.
+
+"),
+
+("System","Base","@allocated","@allocated()
+
+   A macro to evaluate an expression, discarding the resulting value,
+   instead returning the total number of bytes allocated during
+   evaluation of the expression.
 
 "),
 
@@ -4960,7 +5212,9 @@
 ("Tasks","Base","yield","yield()
 
    For scheduled tasks, switch back to the scheduler to allow another
-   scheduled task to run.
+   scheduled task to run. A task that calls this function is still
+   runnable, and will be restarted immediately if there are no other
+   runnable tasks.
 
 "),
 
@@ -4975,6 +5229,122 @@
 
    Assign a value to a symbol in the current task's task-local
    storage.
+
+"),
+
+("Tasks","Base","Condition","Condition()
+
+   Create an edge-triggered event source that tasks can wait for.
+   Tasks that call \"wait\" on a \"Condition\" are suspended and
+   queued. Tasks are woken up when \"notify\" is later called on the
+   \"Condition\". Edge triggering means that only tasks waiting at the
+   time \"notify\" is called can be woken up. For level-triggered
+   notifications, you must keep extra state to keep track of whether a
+   notification has happened. The \"RemoteRef\" type does this, and so
+   can be used for level-triggered events.
+
+"),
+
+("Tasks","Base","notify","notify(condition, val=nothing; all=true, error=false)
+
+   Wake up tasks waiting for a condition, passing them \"val\". If
+   \"all\" is true (the default), all waiting tasks are woken,
+   otherwise only one is. If \"error\" is true, the passed value is
+   raised as an exception in the woken tasks.
+
+"),
+
+("Tasks","Base","schedule","schedule(t::Task)
+
+   Add a task to the scheduler's queue. This causes the task to run
+   constantly when the system is otherwise idle, unless the task
+   performs a blocking operation such as \"wait\".
+
+"),
+
+("Tasks","Base","@schedule","@schedule()
+
+   Wrap an expression in a Task and add it to the scheduler's queue.
+
+"),
+
+("Tasks","Base","@task","@task()
+
+   Wrap an expression in a Task executing it, and return the Task.
+   This only creates a task, and does not run it.
+
+"),
+
+("Tasks","Base","sleep","sleep(seconds)
+
+   Block the current task for a specified number of seconds.
+
+"),
+
+("Reflection","Base","module_name","module_name(m::Module) -> Symbol
+
+   Get the name of a module as a symbol.
+
+"),
+
+("Reflection","Base","module_parent","module_parent(m::Module) -> Module
+
+   Get a module's enclosing module. \"Main\" is its own parent.
+
+"),
+
+("Reflection","Base","current_module","current_module() -> Module
+
+   Get the *dynamically* current module, which is the module code is
+   currently being read from. In general, this is not the same as the
+   module containing the call to this function.
+
+"),
+
+("Reflection","Base","fullname","fullname(m::Module)
+
+   Get the fully-qualified name of a module as a tuple of symbols. For
+   example, \"fullname(Base.Pkg)\" gives \"(:Base,:Pkg)\", and
+   \"fullname(Main)\" gives \"()\".
+
+"),
+
+("Reflection","Base","names","names(x)
+
+   Get an array of the names exported by a module, or the fields of a
+   data type.
+
+"),
+
+("Reflection","Base","isconst","isconst([m::Module], s::Symbol) -> Bool
+
+   Determine whether a global is declared \"const\" in a given module.
+
+"),
+
+("Reflection","Base","isgeneric","isgeneric(f::Function) -> Bool
+
+   Determine whether a function is generic.
+
+"),
+
+("Reflection","Base","function_name","function_name(f::Function) -> Symbol
+
+   Get the name of a generic function as a symbol, or \":anonymous\".
+
+"),
+
+("Reflection","Base","function_module","function_module(f::Function, types) -> Module
+
+   Determine the module containing a given definition of a generic
+   function.
+
+"),
+
+("Reflection","Base","functionloc","functionloc(f::Function, types)
+
+   Returns a tuple \"(filename,line)\" giving the location of a method
+   definition.
 
 "),
 
@@ -5682,7 +6052,9 @@
 ("Linear Algebra","Base","Tridiagonal","Tridiagonal(dl, d, du)
 
    Construct a tridiagonal matrix from the lower diagonal, diagonal,
-   and upper diagonal
+   and upper diagonal, respectively.  The result is of type
+   \"Tridiagonal\" and provides efficient specialized linear solvers,
+   but may be converted into a regular matrix with \"full\".
 
 "),
 
@@ -5690,7 +6062,18 @@
 
    Constructs an upper (isupper=true) or lower (isupper=false)
    bidiagonal matrix using the given diagonal (dv) and off-diagonal
-   (ev) vectors
+   (ev) vectors.  The result is of type \"Bidiagonal\" and provides
+   efficient specialized linear solvers, but may be converted into a
+   regular matrix with \"full\".
+
+"),
+
+("Linear Algebra","Base","SymTridiagonal","SymTridiagonal(d, du)
+
+   Construct a real-symmetric tridiagonal matrix from the diagonal and
+   upper diagonal, respectively. The result is of type
+   \"SymTridiagonal\" and provides efficient specialized eigensolvers,
+   but may be converted into a regular matrix with \"full\".
 
 "),
 
@@ -5871,6 +6254,23 @@
 
 "),
 
+("Linear Algebra","Base","peakflops","peakflops(n; parallel=false)
+
+   \"peakflops\" computes the peak flop rate of the computer by using
+   BLAS dgemm. By default, if no arguments are specified, it
+   multiplies a matrix of size \"n x n\", where \"n = 2000\". If the
+   underlying BLAS is using multiple threads, higher flop rates are
+   realized. The number of BLAS threads can be set with
+   \"blas_set_num_threads(n)\".
+
+   If the keyword argument \"parallel\" is set to \"true\",
+   \"peakflops\" is run in parallel on all the worker processors. The
+   flop rate of the entire parallel computer is returned. When running
+   in parallel, only 1 BLAS thread is used. The argument \"n\" still
+   refers to the size of the problem that is solved on each processor.
+
+"),
+
 ("BLAS Functions","Base","copy!","copy!(n, X, incx, Y, incy)
 
    Copy \"n\" elements of array \"X\" with stride \"incx\" to array
@@ -5987,6 +6387,12 @@
 
    Returns \"alpha*A*B\" or the other three variants according to
    \"tA\" (transpose \"A\") and \"tB\".
+
+"),
+
+("BLAS Functions","Base.LinAlg.BLAS","blas_set_num_threads","blas_set_num_threads(n)
+
+   Set the number of threads the BLAS library should use.
 
 "),
 
@@ -6283,7 +6689,7 @@
 
 "),
 
-("Base.Test","Base.Test","@test_fails","@test_fails(ex)
+("Base.Test","Base.Test","@test_throws","@test_throws(ex)
 
    Test the expression \"ex\" and calls the current handler to handle
    the result in the following manner:

@@ -3,6 +3,12 @@ show(io::IO, t::Task) = print(io, "Task")
 current_task() = ccall(:jl_get_current_task, Any, ())::Task
 istaskdone(t::Task) = t.done
 
+# yield to a task, throwing an exception in it
+function throwto(t::Task, exc)
+    t.exception = exc
+    yieldto(t)
+end
+
 function task_local_storage()
     t = current_task()
     if is(t.storage, nothing)
@@ -12,6 +18,17 @@ function task_local_storage()
 end
 task_local_storage(key) = task_local_storage()[key]
 task_local_storage(key, val) = (task_local_storage()[key] = val)
+
+# NOTE: you can only wait for scheduled tasks
+function wait(t::Task)
+    if is(t.donenotify, nothing)
+        t.donenotify = Condition()
+    end
+    while !istaskdone(t)
+        wait(t.donenotify)
+    end
+    t.result
+end
 
 function produce(v)
     ct = current_task()
@@ -59,6 +76,14 @@ macro task(ex)
     :(Task(()->$(esc(ex))))
 end
 
+# schedule an expression to run asynchronously, with minimal ceremony
+macro schedule(expr)
+    expr = localize_vars(:(()->($expr)), false)
+    :(enq_work(Task($(esc(expr)))))
+end
+
+schedule(t::Task) = enq_work(t)
+
 ## condition variables
 
 type Condition
@@ -76,28 +101,53 @@ function wait(c::Condition)
     push!(c.waitq, ct)
 
     ct.runnable = false
-    args = yield(c)
-
-    if isa(args,InterruptException)
+    try
+        yield(c)
+    catch
         filter!(x->x!==ct, c.waitq)
-        error(args)
+        rethrow()
     end
-    args
 end
 
-function notify(c::Condition, arg=nothing; all=true)
+function wait()
+    ct = current_task()
+    if ct === Scheduler
+        error("cannot execute blocking function from scheduler")
+    end
+    ct.runnable = false
+    yield()
+end
+
+function notify(t::Task, arg::ANY=nothing; error=false)
+    if t.runnable == true
+        Base.error("tried to resume task that is not stopped")
+    end
+    if error
+        t.exception = arg
+    else
+        t.result = arg
+    end
+    enq_work(t)
+    nothing
+end
+notify_error(t::Task, err) = notify(t, err, error=true)
+
+function notify(c::Condition, arg::ANY=nothing; all=true, error=false)
     if all
         for t in c.waitq
-            t.result = arg
+            !error ? (t.result = arg) : (t.exception = arg)
             enq_work(t)
         end
         empty!(c.waitq)
     elseif !isempty(c.waitq)
         t = shift!(c.waitq)
-        t.result = arg
+        !error? (t.result = arg) : (t.exception = arg)
         enq_work(t)
     end
     nothing
 end
 
 notify1(c::Condition, arg=nothing) = notify(c, arg, all=false)
+
+notify_error(c::Condition, err) = notify(c, err, error=true)
+notify1_error(c::Condition, err) = notify(c, err, error=true, all=false)

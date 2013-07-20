@@ -158,6 +158,8 @@ static void __fastcall win_raise_exception(void* excpt)
 { //why __fastcall? because the first two arguments are passed in registers, making this easier
     jl_throw(excpt);
 }
+DLLEXPORT void gdbbacktrace();
+DLLEXPORT void gdblookup(ptrint_t ip);
 static BOOL WINAPI sigint_handler(DWORD wsig) //This needs winapi types to guarantee __stdcall
 {
     int sig;
@@ -232,7 +234,54 @@ static LONG WINAPI exception_handler(struct _EXCEPTION_POINTERS *ExceptionInfo) 
 #endif
             return EXCEPTION_CONTINUE_EXECUTION;
         default:
-            puts("Please submit a bug report with steps to reproduce this fault, and any error messages that follow (in their entirety). Thanks.\n");
+            ios_puts("Please submit a bug report with steps to reproduce this fault, and any error messages that follow (in their entirety). Thanks.\nException: ", ios_stderr);
+            switch (ExceptionInfo->ExceptionRecord->ExceptionCode) {
+                case EXCEPTION_ACCESS_VIOLATION:
+                    ios_puts("EXCEPTION_ACCESS_VIOLATION", ios_stderr); break;
+                case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+                    ios_puts("EXCEPTION_ARRAY_BOUNDS_EXCEEDED", ios_stderr); break;
+                case EXCEPTION_BREAKPOINT:
+                    ios_puts("EXCEPTION_BREAKPOINT", ios_stderr); break;
+                case EXCEPTION_DATATYPE_MISALIGNMENT:
+                    ios_puts("EXCEPTION_DATATYPE_MISALIGNMENT", ios_stderr); break;
+                case EXCEPTION_FLT_DENORMAL_OPERAND:
+                    ios_puts("EXCEPTION_FLT_DENORMAL_OPERAND", ios_stderr); break;
+                case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+                    ios_puts("EXCEPTION_FLT_DIVIDE_BY_ZERO", ios_stderr); break;
+                case EXCEPTION_FLT_INEXACT_RESULT:
+                    ios_puts("EXCEPTION_FLT_INEXACT_RESULT", ios_stderr); break;
+                case EXCEPTION_FLT_INVALID_OPERATION:
+                    ios_puts("EXCEPTION_FLT_INVALID_OPERATION", ios_stderr); break;
+                case EXCEPTION_FLT_OVERFLOW:
+                    ios_puts("EXCEPTION_FLT_OVERFLOW", ios_stderr); break;
+                case EXCEPTION_FLT_STACK_CHECK:
+                    ios_puts("EXCEPTION_FLT_STACK_CHECK", ios_stderr); break;
+                case EXCEPTION_FLT_UNDERFLOW:
+                    ios_puts("EXCEPTION_FLT_UNDERFLOW", ios_stderr); break;
+                case EXCEPTION_ILLEGAL_INSTRUCTION:
+                    ios_puts("EXCEPTION_ILLEGAL_INSTRUCTION", ios_stderr); break;
+                case EXCEPTION_IN_PAGE_ERROR:
+                    ios_puts("EXCEPTION_IN_PAGE_ERROR", ios_stderr); break;
+                case EXCEPTION_INT_DIVIDE_BY_ZERO:
+                    ios_puts("EXCEPTION_INT_DIVIDE_BY_ZERO", ios_stderr); break;
+                case EXCEPTION_INT_OVERFLOW:
+                    ios_puts("EXCEPTION_INT_OVERFLOW", ios_stderr); break;
+                case EXCEPTION_INVALID_DISPOSITION:
+                    ios_puts("EXCEPTION_INVALID_DISPOSITION", ios_stderr); break;
+                case EXCEPTION_NONCONTINUABLE_EXCEPTION:
+                    ios_puts("EXCEPTION_NONCONTINUABLE_EXCEPTION", ios_stderr); break;
+                case EXCEPTION_PRIV_INSTRUCTION:
+                    ios_puts("EXCEPTION_PRIV_INSTRUCTION", ios_stderr); break;
+                case EXCEPTION_SINGLE_STEP:
+                    ios_puts("EXCEPTION_SINGLE_STEP", ios_stderr); break;
+                case EXCEPTION_STACK_OVERFLOW:
+                    ios_puts("EXCEPTION_STACK_OVERFLOW", ios_stderr); break;
+                default:
+                    ios_puts("UNKNOWN", ios_stderr); break;
+            }
+            ios_printf(ios_stderr," at 0x%Ix\n", (size_t)ExceptionInfo->ExceptionRecord->ExceptionAddress);
+            gdblookup((ptrint_t)ExceptionInfo->ExceptionRecord->ExceptionAddress);
+            gdbbacktrace();
             break;
         }
     }
@@ -288,6 +337,9 @@ DLLEXPORT void uv_atexit_hook()
             jl_apply((jl_function_t*)f, NULL, 0);
         }
     }
+
+    jl_gc_run_all_finalizers();
+
     uv_loop_t* loop = jl_global_event_loop();
     struct uv_shutdown_queue queue = {NULL, NULL};
     uv_walk(loop, jl_uv_exitcleanup_walk, &queue);
@@ -303,6 +355,9 @@ DLLEXPORT void uv_atexit_hook()
             continue;
         }
         switch(handle->type) {
+        case UV_FILE:
+            free(handle);
+            break;
         case UV_TTY:
         case UV_UDP:
 //#ifndef _OS_WINDOWS_ // unix only supports shutdown on TCP and NAMED_PIPE
@@ -388,6 +443,7 @@ void *init_stdio_handle(uv_file fd,int readable)
 {
     void *handle;
     uv_handle_type type = uv_guess_handle(fd);
+    jl_uv_file_t *file;
     //printf("%d: %d -- %d\n", fd, type);
     switch(type)
     {
@@ -400,15 +456,17 @@ void *init_stdio_handle(uv_file fd,int readable)
             ((uv_tty_t*)handle)->data=0;
             uv_tty_set_mode((void*)handle,0); //cooked stdio
             break;
-        case UV_FILE:
-#ifdef _OS_WINDOWS_
-            jl_errorf("This type of handle for stdio is not yet supported on Windows (%d, %d)!\n", fd, type);
-            handle = NULL;
+        case UV_FILE: 
+            file = malloc(sizeof(jl_uv_file_t));
+            file->loop = jl_io_loop;
+            file->type = UV_FILE;
+            file->file = fd;
+            file->data = 0;
+            handle = file;
             break;
-#endif
         case UV_NAMED_PIPE:
             handle = malloc(sizeof(uv_pipe_t));
-            if (uv_pipe_init(jl_io_loop, (uv_pipe_t*)handle, (readable?UV_PIPE_READABLE:UV_PIPE_WRITEABLE))) {
+            if (uv_pipe_init(jl_io_loop, (uv_pipe_t*)handle, (readable?UV_PIPE_READABLE:UV_PIPE_WRITABLE))) {
                 jl_errorf("Error initializing stdio in uv_pipe_init (%d, %d)\n", fd, type);
                 abort();
             }
@@ -419,6 +477,17 @@ void *init_stdio_handle(uv_file fd,int readable)
             ((uv_pipe_t*)handle)->data=0;
             break;
         case UV_TCP:
+            handle = malloc(sizeof(uv_tcp_t));
+            if (uv_tcp_init(jl_io_loop, (uv_tcp_t*)handle)) {
+                jl_errorf("Error initializing stdio in uv_tcp_init (%d, %d)\n", fd, type);
+                abort();
+            }
+            if (uv_tcp_open((uv_tcp_t*)handle,fd)) {
+                jl_errorf("Error initializing stdio in uv_tcp_open (%d, %d)\n", fd, type);
+                abort();
+            }
+            ((uv_tcp_t*)handle)->data=0;
+            break;
         case UV_UDP:
         default:
             jl_errorf("This type of handle for stdio is not yet supported (%d, %d)!\n", fd, type);
@@ -653,9 +722,11 @@ static jl_value_t *basemod(char *name)
 // fetch references to things defined in boot.jl
 void jl_get_builtin_hooks(void)
 {
-    jl_nothing      = core("nothing");
+    jl_nothing = core("nothing");
     jl_root_task->tls = jl_nothing;
     jl_root_task->consumers = jl_nothing;
+    jl_root_task->donenotify = jl_nothing;
+    jl_root_task->exception = jl_nothing;
 
     jl_char_type    = (jl_datatype_t*)core("Char");
     jl_int8_type    = (jl_datatype_t*)core("Int8");
@@ -667,6 +738,7 @@ void jl_get_builtin_hooks(void)
 
     jl_float32_type = (jl_datatype_t*)core("Float32");
     jl_float64_type = (jl_datatype_t*)core("Float64");
+    jl_floatingpoint_type = (jl_datatype_t*)core("FloatingPoint");
 
     jl_stackovf_exception =
         jl_apply((jl_function_t*)core("StackOverflowError"), NULL, 0);

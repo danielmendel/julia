@@ -4,8 +4,8 @@ print(io::IO, x) = show(io, x)
 print(io::IO, xs...) = for x in xs print(io, x) end
 println(io::IO, xs...) = print(io, xs..., '\n')
 
-print(xs...)   = print(OUTPUT_STREAM, xs...)
-println(xs...) = println(OUTPUT_STREAM, xs...)
+print(xs...)   = print(STDOUT, xs...)
+println(xs...) = println(STDOUT, xs...)
 
 ## core string functions ##
 
@@ -63,8 +63,8 @@ getindex(s::String, v::AbstractVector) =
 
 symbol(s::String) = symbol(bytestring(s))
 
-print(io::IO, s::String) = for c in s write(io, c) end
-write(io::IO, s::String) = print(io, s)
+print(io::IO, s::String) = write(io, s)
+write(io::IO, s::String) = for c in s write(io, c) end
 show(io::IO, s::String) = print_quoted(io, s)
 
 sizeof(s::String) = error("type $(typeof(s)) has no canonical binary representation")
@@ -100,8 +100,11 @@ function isvalid(s::String, i::Integer)
 end
 
 prevind(s::DirectIndexString, i::Integer) = i-1
+prevind(s                   , i::Integer) = i-1
 thisind(s::DirectIndexString, i::Integer) = i
+thisind(s                   , i::Integer) = i
 nextind(s::DirectIndexString, i::Integer) = i+1
+nextind(s                   , i::Integer) = i+1
 
 prevind(s::String, i::Integer) = thisind(s,thisind(s,i)-1)
 
@@ -261,7 +264,7 @@ function _rsearch(s, t, i)
 end
 rsearch(s::Union(Array{Uint8,1},Array{Int8,1}),t::Union(Array{Uint8,1},Array{Int8,1}),i) = _rsearch(s,t,i)
 rsearch(s::String, t::String, i::Integer) = _rsearch(s,t,i)
-rsearch(s::String, t::String) = rsearch(s,t,endof(s))
+rsearch(s::String, t::String) = (isempty(s) && isempty(t)) ? (1:0) : rsearch(s,t,endof(s))
 
 contains(::String, ::String) = error("use search() to look for substrings")
 
@@ -371,6 +374,8 @@ next(s::CharString, i::Int) = (s.chars[i], i+1)
 endof(s::CharString) = length(s.chars)
 length(s::CharString) = length(s.chars)
 
+convert(::Type{CharString}, s::String) = CharString(Char[c for c in s])
+
 ## substrings reference original strings ##
 
 immutable SubString{T<:String} <: String
@@ -394,6 +399,7 @@ SubString(s::String, i::Integer) = SubString(s, i, endof(s))
 
 write{T<:ByteString}(to::IOBuffer, s::SubString{T}) =
     s.endof==0 ? 0 : write_sub(to, s.string.data, s.offset+1, next(s,s.endof)[2]-1)
+print(io::IOBuffer, s::SubString) = write(io, s)
 
 sizeof{T<:ByteString}(s::SubString{T}) = s.endof==0 ? 0 : next(s,s.endof)[2]-1
 
@@ -410,6 +416,16 @@ endof(s::SubString) = s.endof
 # default implementation will work but it's slow
 # can this be delegated efficiently somehow?
 # that may require additional string interfaces
+
+thisind(s::SubString, i::Integer) = thisind(s.string, i+s.offset)-s.offset
+nextind(s::SubString, i::Integer) = nextind(s.string, i+s.offset)-s.offset
+
+convert{T<:String}(::Type{SubString{T}}, s::T) = SubString(s, 1, endof(s))
+
+function serialize{T}(s, ss::SubString{T})
+    # avoid saving a copy of the parent string, keeping the type of ss
+    invoke(serialize, (Any,Any), s, convert(SubString{T}, convert(T,ss)))
+end
 
 function getindex(s::String, r::Range1{Int})
     if first(r) < 1 || endof(s) < last(r)
@@ -1028,6 +1044,32 @@ split(s::String, spl)             = split(s, spl, 0, true)
 const _default_delims = [' ','\t','\n','\v','\f','\r']
 split(str::String) = split(str, _default_delims, 0, false)
 
+function rsplit(str::String, splitter, limit::Integer, keep_empty::Bool)
+    strs = String[]
+    i = start(str)
+    n = endof(str)
+    r = rsearch(str,splitter)
+    j = first(r)-1
+    k = last(r)
+    while((0 <= j < n) && (length(strs) != limit-1))
+        if i <= k
+            (keep_empty || (k < n)) && unshift!(strs, str[k+1:n])
+            n = j
+        end
+        (k <= j) && (j = prevind(str,j))
+        r = rsearch(str,splitter,j)
+        j = first(r)-1
+        k = last(r)
+    end
+    (keep_empty || (n > 0)) && unshift!(strs, str[1:n])
+    return strs
+end
+rsplit(s::String, spl, n::Integer) = rsplit(s, spl, n, true)
+rsplit(s::String, spl, keep::Bool) = rsplit(s, spl, 0, keep)
+rsplit(s::String, spl)             = rsplit(s, spl, 0, true)
+#rsplit(str::String) = rsplit(str, _default_delims, 0, false)
+
+
 function replace(str::ByteString, pattern, repl::Function, limit::Integer)
     n = 1
     rstr = ""
@@ -1237,9 +1279,9 @@ float32_isvalid(s::String, out::Array{Float32,1}) =
     ccall(:jl_strtof, Int32, (Ptr{Uint8},Ptr{Float32}), s, out) == 0
 
 float64_isvalid(s::SubString, out::Array{Float64,1}) =
-    ccall(:jl_substrtod, Int32, (Ptr{Uint8},Int,Int,Ptr{Float64}), s.string, s.offset, s.endof, out) == 0
+    ccall(:jl_substrtod, Int32, (Ptr{Uint8},Csize_t,Int,Ptr{Float64}), s.string, convert(Csize_t,s.offset), s.endof, out) == 0
 float32_isvalid(s::SubString, out::Array{Float32,1}) =
-    ccall(:jl_substrtof, Int32, (Ptr{Uint8},Int,Int,Ptr{Float32}), s.string, s.offset, s.endof, out) == 0
+    ccall(:jl_substrtof, Int32, (Ptr{Uint8},Csize_t,Int,Ptr{Float32}), s.string, convert(Csize_t,s.offset), s.endof, out) == 0
 
 begin
     local tmp::Array{Float64,1} = Array(Float64,1)
@@ -1341,4 +1383,10 @@ function hex2bytes(s::ASCIIString)
 end
 
 bytes2hex(arr::Array{Uint8,1}) = join([hex(i, 2) for i in arr])
+
+function repr(x)
+    s = IOBuffer()
+    show(s, x)
+    takebuf_string(s)
+end
 

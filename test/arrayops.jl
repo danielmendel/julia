@@ -93,27 +93,45 @@ ind = findin(a, b)
 # sub
 A = reshape(1:120, 3, 5, 8)
 sA = sub(A, 2, 1:5, 1:8)
+@test Base.parentdims(sA) == 1:3
 @test size(sA) == (1, 5, 8)
-@test_fails sA[2, 1:8]
+@test_throws sA[2, 1:8]
 @test sA[1, 2, 1:8][:] == 5:15:120
 sA[2:5:end] = -1
 @test all(sA[2:5:end] .== -1)
 @test all(A[5:15:120] .== -1)
+@test strides(sA) == (1,3,15)
 sA = sub(A, 1:3, 1:5, 5)
+@test Base.parentdims(sA) == 1:2
 sA[1:3,1:5] = -2
 @test all(A[:,:,5] .== -2)
+sA[:] = -3
+@test all(A[:,:,5] .== -3)
+@test strides(sA) == (1,3)
+sA = sub(A, 1:2:3, 1:3:5, 1:2:8)
+@test Base.parentdims(sA) == 1:3
+@test strides(sA) == (2,9,30)
 
 # slice
 A = reshape(1:120, 3, 5, 8)
 sA = slice(A, 2, 1:5, 1:8)
+@test Base.parentdims(sA) == 2:3
 @test size(sA) == (5, 8)
+@test strides(sA) == (3,15)
 @test sA[2, 1:8][:] == 5:15:120
 @test sA[:,1] == 2:3:14
 @test sA[2:5:end] == 5:15:120
 sA[2:5:end] = -1
 @test all(sA[2:5:end] .== -1)
 @test all(A[5:15:120] .== -1)
-
+sA = slice(A, 1:3, 1:5, 5)
+@test Base.parentdims(sA) == 1:2
+@test size(sA) == (3,5)
+@test strides(sA) == (1,3)
+sA = slice(A, 1:2:3, 3, 1:2:8)
+@test Base.parentdims(sA) == [1,3]
+@test size(sA) == (2,4)
+@test strides(sA) == (2,30)
 
 # get
 let
@@ -209,6 +227,12 @@ end
 #argmin argmax
 @assert indmax([10,12,9,11]) == 2
 @assert indmin([10,12,9,11]) == 3
+@assert findmin([NaN,3.2,1.8]) == (1.8,3)
+@assert findmax([NaN,3.2,1.8]) == (3.2,2)
+@assert findmin([NaN,3.2,1.8,NaN]) == (1.8,3)
+@assert findmax([NaN,3.2,1.8,NaN]) == (3.2,2)
+@assert findmin([3.2,1.8,NaN,2.0]) == (1.8,2)
+@assert findmax([3.2,1.8,NaN,2.0]) == (3.2,1)
 
 ## permutedims ##
 
@@ -232,7 +256,7 @@ for i = 1:3
 end
 
 #permutes correctly
-@test isequal(z,permutedims(y,(3,1,2))) 
+@test isequal(z,permutedims(y,(3,1,2)))
 
 # of a subarray
 a = rand(5,5)
@@ -389,7 +413,13 @@ begin
         @test s[:,i] == sort(a[:,i])
         @test vec(S[i,:]) == sort(vec(a[i,:]))
     end
+
+    # issue #3613
+    b = mapslices(sum, ones(2,3,4), [1,2])
+    @test size(b) === (1,1,4)
+    @test all(b.==6)
 end
+
 
 # single multidimensional index
 let
@@ -424,11 +454,11 @@ begin
     @test isless(asc[:,1],asc[:,2])
     @test isless(asc[:,2],asc[:,3])
 
-    asr = sortrows(a, Sort.Reverse)
+    asr = sortrows(a, rev=true)
     @test isless(asr[2,:],asr[1,:])
     @test isless(asr[3,:],asr[2,:])
 
-    asc = sortcols(a, Sort.Reverse)
+    asc = sortcols(a, rev=true)
     @test isless(asc[:,2],asc[:,1])
     @test isless(asc[:,3],asc[:,2])
 
@@ -471,5 +501,5 @@ end
 @test isequal([1,2,3], [a for (a,b) in enumerate(2:4)])
 @test isequal([2,3,4], [b for (a,b) in enumerate(2:4)])
 
-@test_fails (10.^[-1])[1] == 0.1
+@test_throws (10.^[-1])[1] == 0.1
 @test (10.^[-1.])[1] == 0.1

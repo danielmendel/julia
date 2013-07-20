@@ -15,7 +15,9 @@ size(a::Array) = arraysize(a)
 size(a::Array, d) = arraysize(a, d)
 size(a::Matrix) = (arraysize(a,1), arraysize(a,2))
 length(a::Array) = arraylen(a)
-sizeof(a::Array) = sizeof(eltype(a)) * length(a)
+function sizeof{T}(a::Array{T})
+    (isbits(T) ? sizeof(eltype(a)) : sizeof(Ptr)) * length(a)
+end
 
 function stride(a::Array, i::Integer)
     s = 1
@@ -199,11 +201,17 @@ end
 fill(v, dims::Dims)       = fill!(Array(typeof(v), dims), v)
 fill(v, dims::Integer...) = fill!(Array(typeof(v), dims...), v)
 
-zeros{T}(::Type{T}, args...) = fill!(Array(T, args...), zero(T))
-zeros(args...)               = fill!(Array(Float64, args...), float64(0))
+zeros{T}(::Type{T}, dims...) = fill!(Array(T, dims...), zero(T))
+zeros(dims...)               = fill!(Array(Float64, dims...), 0.0)
 
-ones{T}(::Type{T}, args...) = fill!(Array(T, args...), one(T))
-ones(args...)               = fill!(Array(Float64, args...), float64(1))
+ones{T}(::Type{T}, dims...) = fill!(Array(T, dims...), one(T))
+ones(dims...)               = fill!(Array(Float64, dims...), 1.0)
+
+infs{T}(::Type{T}, dims...) = fill!(Array(T, dims...), inf(T))
+infs(dims...)               = fill!(Array(Float64, dims...), Inf)
+
+nans{T}(::Type{T}, dims...) = fill!(Array(T, dims...), nan(T))
+nans(dims...)               = fill!(Array(Float64, dims...), NaN)
 
 function eye(T::Type, m::Int, n::Int)
     a = zeros(T,m,n)
@@ -250,7 +258,16 @@ convert{T,n}(::Type{Array{T,n}}, x::Array{T,n}) = x
 convert{T,n,S}(::Type{Array{T}}, x::Array{S,n}) = convert(Array{T,n}, x)
 convert{T,n,S}(::Type{Array{T,n}}, x::Array{S,n}) = copy!(similar(x,T), x)
 
-collect(itr) = [x for x in itr]
+function collect{T}(itr::T)
+    if method_exists(length,(T,))
+        return [x for x in itr]
+    end
+    a = Array(eltype(itr),0)
+    for x in itr
+        push!(a,x)
+    end
+    return a
+end
 
 ## Indexing: getindex ##
 
@@ -628,9 +645,9 @@ setindex!{T<:Real}(A::Array, x, I::AbstractVector{Bool}, J::AbstractVector{T}) =
 
 # get (getindex with a default value)
 
-get{T}(A::Array, i::Integer, default::T) = in_bounds(length(A), i) ? A[i] : default
-get{T}(A::Array, I::(), default::T) = Array(T, 0)
-get{T}(A::Array, I::Dims, default::T) = in_bounds(size(A), I...) ? A[I...] : default
+get(A::Array, i::Integer, default) = in_bounds(length(A), i) ? A[i] : default
+get(A::Array, I::(), default) = Array(typeof(default), 0)
+get(A::Array, I::Dims, default) = in_bounds(size(A), I...) ? A[I...] : default
 
 function get{T}(X::Array{T}, A::Array, I::Union(Ranges, Vector{Int}), default::T)
     ind = findin(I, 1:length(A))
@@ -639,9 +656,9 @@ function get{T}(X::Array{T}, A::Array, I::Union(Ranges, Vector{Int}), default::T
     X[last(ind)+1:length(X)] = default
     X
 end
-get{T}(A::Array, I::Ranges, default::T) = get(Array(T, length(I)), A, I, default)
+get(A::Array, I::Ranges, default) = get(Array(typeof(default), length(I)), A, I, default)
 
-RangeVecIntList = Union((Union(Ranges, Vector{Int})...), Vector{Range1{Int}}, Vector{Range{Int}}, Vector{Vector{Int}})
+typealias RangeVecIntList Union((Union(Ranges, Vector{Int})...), Vector{Range1{Int}}, Vector{Range{Int}}, Vector{Vector{Int}})
 
 function get{T}(X::Array{T}, A::Array, I::RangeVecIntList, default::T)
     fill!(X, default)
@@ -649,7 +666,7 @@ function get{T}(X::Array{T}, A::Array, I::RangeVecIntList, default::T)
     X[dst...] = A[src...]
     X
 end
-get{T}(A::Array, I::RangeVecIntList, default::T) = get(Array(T, map(length, I)...), A, I, default)
+get(A::Array, I::RangeVecIntList, default) = get(Array(typeof(default), map(length, I)...), A, I, default)
 
 ## Dequeue functionality ##
 
@@ -929,7 +946,7 @@ for f in (:+, :-, :div, :mod, :&, :|, :$)
         function ($f){S,T}(A::StridedArray{S}, B::StridedArray{T})
             F = Array(promote_type(S,T), promote_shape(size(A),size(B)))
             for i=1:length(A)
-                F[i] = ($f)(A[i], B[i])
+                @inbounds F[i] = ($f)(A[i], B[i])
             end
             return F
         end
@@ -940,14 +957,14 @@ for f in (:+, :-, :.*, :./, :div, :mod, :&, :|, :$)
         function ($f){T}(A::Number, B::StridedArray{T})
             F = similar(B, promote_array_type(typeof(A),T))
             for i=1:length(B)
-                F[i] = ($f)(A, B[i])
+                @inbounds F[i] = ($f)(A, B[i])
             end
             return F
         end
         function ($f){T}(A::StridedArray{T}, B::Number)
             F = similar(A, promote_array_type(typeof(B),T))
             for i=1:length(A)
-                F[i] = ($f)(A[i], B)
+                @inbounds F[i] = ($f)(A[i], B)
             end
             return F
         end
@@ -956,7 +973,7 @@ for f in (:+, :-, :.*, :./, :div, :mod, :&, :|, :$)
             F = Array(promote_type(S,T), promote_shape(size(A),size(B)))
             i = 1
             for b in B
-                F[i] = ($f)(A[i], b)
+                @inbounds F[i] = ($f)(A[i], b)
                 i += 1
             end
             return F
@@ -965,7 +982,7 @@ for f in (:+, :-, :.*, :./, :div, :mod, :&, :|, :$)
             F = Array(promote_type(S,T), promote_shape(size(A),size(B)))
             i = 1
             for a in A
-                F[i] = ($f)(a, B[i])
+                @inbounds F[i] = ($f)(a, B[i])
                 i += 1
             end
             return F
@@ -995,7 +1012,7 @@ function complex{S<:Real,T<:Real}(A::Array{S}, B::Array{T})
     if size(A) != size(B); error("argument dimensions must match"); end
     F = similar(A, typeof(complex(zero(S),zero(T))))
     for i=1:length(A)
-        F[i] = complex(A[i], B[i])
+        @inbounds F[i] = complex(A[i], B[i])
     end
     return F
 end
@@ -1003,7 +1020,7 @@ end
 function complex{T<:Real}(A::Real, B::Array{T})
     F = similar(B, typeof(complex(A,zero(T))))
     for i=1:length(B)
-        F[i] = complex(A, B[i])
+        @inbounds F[i] = complex(A, B[i])
     end
     return F
 end
@@ -1011,7 +1028,7 @@ end
 function complex{T<:Real}(A::Array{T}, B::Real)
     F = similar(A, typeof(complex(zero(T),B)))
     for i=1:length(A)
-        F[i] = complex(A[i], B)
+        @inbounds F[i] = complex(A[i], B)
     end
     return F
 end
@@ -1340,8 +1357,9 @@ function findmax(a)
     m = a[1]
     mi = 1
     for i=2:length(a)
-        if a[i] > m
-            m = a[i]
+        ai = a[i]
+        if ai > m || isnan(m)
+            m = ai
             mi = i
         end
     end
@@ -1355,8 +1373,9 @@ function findmin(a)
     m = a[1]
     mi = 1
     for i=2:length(a)
-        if a[i] < m
-            m = a[i]
+        ai = a[i]
+        if ai < m || isnan(m)
+            m = ai
             mi = i
         end
     end

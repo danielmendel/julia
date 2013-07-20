@@ -227,12 +227,16 @@ Linear algebra functions in Julia are largely implemented by calling functions f
 
 .. function:: Tridiagonal(dl, d, du)
 
-   Construct a tridiagonal matrix from the lower diagonal, diagonal, and upper diagonal
+   Construct a tridiagonal matrix from the lower diagonal, diagonal, and upper diagonal, respectively.  The result is of type ``Tridiagonal`` and provides efficient specialized linear solvers, but may be converted into a regular matrix with ``full``.
 
 .. function:: Bidiagonal(dv, ev, isupper)
 
    Constructs an upper (isupper=true) or lower (isupper=false) bidiagonal matrix
-   using the given diagonal (dv) and off-diagonal (ev) vectors
+   using the given diagonal (dv) and off-diagonal (ev) vectors.  The result is of type ``Bidiagonal`` and provides efficient specialized linear solvers, but may be converted into a regular matrix with ``full``.
+
+.. function:: SymTridiagonal(d, du)
+
+   Construct a real-symmetric tridiagonal matrix from the diagonal and upper diagonal, respectively. The result is of type ``SymTridiagonal`` and provides efficient specialized eigensolvers, but may be converted into a regular matrix with ``full``.
 
 .. function:: Woodbury(A, U, C, V)
 
@@ -339,6 +343,12 @@ Linear algebra functions in Julia are largely implemented by calling functions f
     * ``tol``: tolerance (:math:`tol \le 0.0` defaults to ``DLAMCH('EPS')``)
     * ``maxiter``: Maximum number of iterations
     * ``ritzvec``: Returns the singular vectors if ``true``
+
+.. function:: peakflops(n; parallel=false)
+
+   ``peakflops`` computes the peak flop rate of the computer by using BLAS dgemm. By default, if no arguments are specified, it multiplies a matrix of size ``n x n``, where ``n = 2000``. If the underlying BLAS is using multiple threads, higher flop rates are realized. The number of BLAS threads can be set with ``blas_set_num_threads(n)``.
+
+   If the keyword argument ``parallel`` is set to ``true``, ``peakflops`` is run in parallel on all the worker processors. The flop rate of the entire parallel computer is returned. When running in parallel, only 1 BLAS thread is used. The argument ``n`` still refers to the size of the problem that is solved on each processor.
 
 BLAS Functions
 --------------
@@ -448,3 +458,6 @@ The following functions are defined within the ``Base.LinAlg.BLAS`` module.
    Returns ``alpha*A*B`` or the other three variants
    according to ``tA`` (transpose ``A``) and ``tB``.
 
+.. function:: blas_set_num_threads(n)
+
+   Set the number of threads the BLAS library should use.
