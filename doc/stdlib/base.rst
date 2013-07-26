@@ -358,6 +358,12 @@ Iterable Collections
 .. function:: contains(itr, x) -> Bool
 
    Determine whether a collection contains the given value, ``x``.
+   
+.. function:: indexin(a, b)
+
+   Returns a vector containing the highest index in ``b``
+   for each value in ``a`` that is a member of ``b`` .
+   The output vector contains 0 wherever ``a`` is not a member of ``b``.
 
 .. function:: findin(a, b)
 
@@ -741,7 +747,7 @@ Strings
 
 .. function:: replace(string, pat, r[, n])
 
-   Search for the given pattern ``pat``, and replace each occurance with ``r``. If ``n`` is provided, replace at most ``n`` occurances.  As with search, the second argument may be a single character, a vector or a set of characters, a string, or a regular expression. If ``r`` is a function, each occurrence is replaced with ``r(s)`` where ``s`` is the matched substring.
+   Search for the given pattern ``pat``, and replace each occurrence with ``r``. If ``n`` is provided, replace at most ``n`` occurrences.  As with search, the second argument may be a single character, a vector or a set of characters, a string, or a regular expression. If ``r`` is a function, each occurrence is replaced with ``r(s)`` where ``s`` is the matched substring.
 
 .. function:: split(string, [chars, [limit,] [include_empty]])
 
@@ -952,15 +958,23 @@ I/O
 
    Close an I/O stream. Performs a ``flush`` first.
 
-.. function:: write(stream, x)
+.. function:: write(stream, x[, byteorder])
 
-   Write the canonical binary representation of a value to the given stream.
+   Write the canonical binary representation of a value to the given
+   stream. For numeric types, the optional argument specifies the byte order
+   or endianness: ``NetworkByteOrder`` for big-endian, ``LittleByteOrder`` for
+   little-endian, and ``HostByteOrder`` (the default) for the type of the
+   host.
 
-.. function:: read(stream, type)
+.. function:: read(stream, type[, byteorder])
 
-   Read a value of the given type from a stream, in canonical binary representation.
+   Read a value of the given type from a stream, in canonical binary
+   representation. For numeric types, the optional argument specifies the byte
+   order or endianness: ``NetworkByteOrder`` for big-endian,
+   ``LittleByteOrder`` for little-endian, and ``HostByteOrder`` (the default)
+   for the type of the host.
 
-.. function:: read(stream, type, dims)
+.. function:: read(stream, type[, byteorder], dims)
 
    Read a series of values of the given type from a stream, in canonical binary representation. ``dims`` is either a tuple or a series of integer arguments specifying the size of ``Array`` to return.
 

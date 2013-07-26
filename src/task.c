@@ -478,27 +478,38 @@ static int frame_info_from_ip(const char **func_name, int *line_num, const char 
 #if defined(_CPU_X86_64_)
 extern int needsSymRefreshModuleList;
 #endif
+static volatile int in_stackwalk = 0;
 DLLEXPORT size_t rec_backtrace(ptrint_t *data, size_t maxsize) {
     CONTEXT Context;
     memset(&Context, 0, sizeof(Context));
+    in_stackwalk = 1;
     RtlCaptureContext(&Context);
+    in_stackwalk = 0;
+    return rec_backtrace_ctx(data, maxsize, &Context);
+}
+DLLEXPORT size_t rec_backtrace_ctx(ptrint_t *data, size_t maxsize, CONTEXT *Context) {
+    if (in_stackwalk) {
+        return 0;
+    }
     STACKFRAME64 stk;
     memset(&stk, 0, sizeof(stk));
 
 #if defined(_CPU_X86_64_) 
     if (needsSymRefreshModuleList) {
+        in_stackwalk = 1;
         SymRefreshModuleList(GetCurrentProcess());
+        in_stackwalk = 0;
         needsSymRefreshModuleList = 0;
     }
     DWORD MachineType = IMAGE_FILE_MACHINE_AMD64;
-    stk.AddrPC.Offset = Context.Rip;
-    stk.AddrStack.Offset = Context.Rsp;
-    stk.AddrFrame.Offset = Context.Rbp;
+    stk.AddrPC.Offset = Context->Rip;
+    stk.AddrStack.Offset = Context->Rsp;
+    stk.AddrFrame.Offset = Context->Rbp;
 #elif defined(_CPU_X86_)
     DWORD MachineType = IMAGE_FILE_MACHINE_I386;
-    stk.AddrPC.Offset = Context.Eip;
-    stk.AddrStack.Offset = Context.Esp;
-    stk.AddrFrame.Offset = Context.Ebp;
+    stk.AddrPC.Offset = Context->Eip;
+    stk.AddrStack.Offset = Context->Esp;
+    stk.AddrFrame.Offset = Context->Ebp;
 #else
 #error WIN16 not supported :P
 #endif
@@ -508,8 +519,10 @@ DLLEXPORT size_t rec_backtrace(ptrint_t *data, size_t maxsize) {
     
     size_t n = 0;
     while (n < maxsize) {
-        BOOL result = StackWalk64(MachineType, GetCurrentProcess(), GetCurrentThread(),
-            &stk, &Context, NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL);
+        in_stackwalk = 1;
+        BOOL result = StackWalk64(MachineType, GetCurrentProcess(), hMainThread,
+            &stk, Context, NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL);
+        in_stackwalk = 0;
         data[n++] = (ptrint_t)stk.AddrPC.Offset;
         if (stk.AddrReturn.Offset == 0)
             break;
@@ -522,12 +535,17 @@ DLLEXPORT size_t rec_backtrace(ptrint_t *data, size_t maxsize) {
 // stacktrace using libunwind
 DLLEXPORT size_t rec_backtrace(ptrint_t *data, size_t maxsize)
 {
-    unw_cursor_t cursor; unw_context_t uc;
+    unw_context_t uc;
+    unw_getcontext(&uc);
+    return rec_backtrace_ctx(data, maxsize, &uc);
+}
+DLLEXPORT size_t rec_backtrace_ctx(ptrint_t *data, size_t maxsize, unw_context_t *uc)
+{
+    unw_cursor_t cursor;
     unw_word_t ip;
     size_t n=0;
     
-    unw_getcontext(&uc);
-    unw_init_local(&cursor, &uc);
+    unw_init_local(&cursor, uc);
     while (unw_step(&cursor) > 0 && n < maxsize) {
         if (unw_get_reg(&cursor, UNW_REG_IP, &ip) < 0) {
             break;
@@ -601,17 +619,16 @@ DLLEXPORT void gdblookup(ptrint_t ip)
     }
 }
 
-DLLEXPORT void gdbbacktrace()
-{
-    record_backtrace();
-    for(size_t i=0; i < bt_size; i++)
-        gdblookup(bt_data[i]);
-}
-
 DLLEXPORT void jlbacktrace()
 {
     for(size_t i=0; i < bt_size; i++)
         gdblookup(bt_data[i]);
+}
+
+DLLEXPORT void gdbbacktrace()
+{
+    record_backtrace();
+    jlbacktrace();
 }
 
 
